@@ -573,9 +573,13 @@ type typeDefSource struct {
 func (c *compiler) recordTypeDefSource(td *TypeDef, line int, isLocal bool, elemKind string) {
 	if existing, ok := c.typeDefSources[td]; ok {
 		c.typeDefSources[td] = typeDefSource{line: line, isLocal: isLocal, source: existing.source, elemKind: elemKind, ordinal: existing.ordinal}
+		td.Line = line
+		td.Source = c.diagSourceOrRecorded(existing.source)
 		return
 	}
 	c.typeDefSources[td] = typeDefSource{line: line, isLocal: isLocal, source: c.includeFile, elemKind: elemKind, ordinal: c.nextTypeDefOrdinal}
+	td.Line = line
+	td.Source = c.diagSource()
 	c.nextTypeDefOrdinal++
 }
 

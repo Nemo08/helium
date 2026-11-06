@@ -607,10 +607,13 @@ func (c *compiler) resolveNotQName(ctx context.Context, elem *helium.Element, re
 
 func (c *compiler) readElementDecl(ctx context.Context, elem *helium.Element, opts elementDeclReadOptions) (*ElementDecl, error) {
 	decl := &ElementDecl{
-		Name:      QName{Local: opts.name, NS: opts.namespace},
-		MinOccurs: opts.minOccurs,
-		MaxOccurs: opts.maxOccurs,
-		Nillable:  c.readBooleanAttr(ctx, elem, attrNillable),
+		Name:       QName{Local: opts.name, NS: opts.namespace},
+		MinOccurs:  opts.minOccurs,
+		MaxOccurs:  opts.maxOccurs,
+		Nillable:   c.readBooleanAttr(ctx, elem, attrNillable),
+		Annotation: c.readAnnotation(elem),
+		Line:       elem.Line(),
+		Source:     c.diagSource(),
 	}
 
 	if opts.allowAbstract {
@@ -795,7 +798,12 @@ func (c *compiler) resolveSubstitutionGroupHeads(ctx context.Context, elem *heli
 }
 
 func (c *compiler) readAttributeUseDecl(ctx context.Context, elem *helium.Element, opts attrUseReadOptions) *AttrUse {
-	au := &AttrUse{Name: opts.name}
+	au := &AttrUse{
+		Name:       opts.name,
+		Annotation: c.readAnnotation(elem),
+		Line:       elem.Line(),
+		Source:     c.diagSource(),
+	}
 	// xs:attribute/@type is an xs:QName: dispatch on PRESENCE. A PRESENT-but-empty
 	// type="" (or a whitespace-only type="   ") is an invalid (empty) QName, reported
 	// by resolveQName, not silently treated as an absent @type that falls through to
@@ -940,10 +948,13 @@ func (c *compiler) parseLocalElement(ctx context.Context, elem *helium.Element) 
 		ref := getAttr(elem, attrRef)
 		qn := c.resolveQName(ctx, elem, attrRef, ref)
 		edecl := &ElementDecl{
-			Name:      qn,
-			MinOccurs: minOcc,
-			MaxOccurs: maxOcc,
-			IsRef:     true,
+			Name:       qn,
+			MinOccurs:  minOcc,
+			MaxOccurs:  maxOcc,
+			IsRef:      true,
+			Annotation: c.readAnnotation(elem),
+			Line:       elem.Line(),
+			Source:     c.diagSource(),
 		}
 		c.elemRefs[edecl] = qn
 		c.markChameleonEligible(edecl, elem, ref)
@@ -1071,7 +1082,12 @@ func (c *compiler) parseAttributeUse(ctx context.Context, elem *helium.Element) 
 			elementDocDeclaresTargetNS(elem) {
 			qn.NS = ""
 		}
-		au := &AttrUse{Name: qn}
+		au := &AttrUse{
+			Name:       qn,
+			Annotation: c.readAnnotation(elem),
+			Line:       elem.Line(),
+			Source:     c.diagSource(),
+		}
 		switch getAttr(elem, attrUse) {
 		case attrValRequired:
 			au.Required = true

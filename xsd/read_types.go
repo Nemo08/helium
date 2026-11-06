@@ -99,7 +99,7 @@ func (c *compiler) recordAttrGroupRef(td *TypeDef, qn QName, src attrGroupRefUse
 }
 
 func (c *compiler) parseComplexType(ctx context.Context, elem *helium.Element, local bool) (*TypeDef, error) {
-	td := &TypeDef{IsComplex: true}
+	td := &TypeDef{IsComplex: true, Annotation: c.readAnnotation(elem)}
 	c.recordTypeDefSource(td, elem.Line(), true, elem.LocalName())
 	component := componentLocalComplexType
 	if !local {
@@ -1134,6 +1134,7 @@ func (c *compiler) parseSimpleContentRestrictionType(ctx context.Context, deriva
 func (c *compiler) parseSimpleType(ctx context.Context, elem *helium.Element, local bool) (*TypeDef, error) {
 	td := &TypeDef{
 		ContentType: ContentTypeSimple,
+		Annotation:  c.readAnnotation(elem),
 	}
 
 	// Record source info for this type as a local (anonymous/inline) simple

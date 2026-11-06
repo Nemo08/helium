@@ -198,6 +198,12 @@ type ElementDecl struct {
 	// the governing type is the one selected by the first alternative whose @test
 	// is true, or a testless default; empty when the declaration has none.
 	Alternatives []*TypeAlternative
+	// Annotation is the component's xs:annotation snapshot, or nil.
+	Annotation *Annotation
+	// Line and Source locate the declaring schema element. Source uses the same
+	// display label as diagnostics and is empty when it is unknown.
+	Line   int
+	Source string
 }
 
 func (e *ElementDecl) substitutionGroupHeads() []QName {
@@ -443,6 +449,14 @@ type TypeDef struct {
 	// parse time, and never read globally in resolveRefs. resolveOpenContent
 	// applies it (subject to appliesToEmpty and the effective content type).
 	pendingDefaultOpenContent *OpenContent
+
+	// Annotation is the type's xs:annotation snapshot, or nil.
+	Annotation *Annotation
+	// Line and Source locate the declaring xs:complexType/xs:simpleType.
+	// Source uses the same display label as diagnostics and is empty when it is
+	// unknown.
+	Line   int
+	Source string
 }
 
 // OpenContentMode is the XSD 1.1 xs:openContent mode.
@@ -542,6 +556,12 @@ type AttrUse struct {
 	// materialized onto an absent attribute resolves its prefix against the
 	// DECLARATION's namespace context, not the instance's.
 	DefaultNS map[string]string
+	// Annotation is the component's xs:annotation snapshot, or nil.
+	Annotation *Annotation
+	// Line and Source locate the declaring schema element. Source uses the same
+	// display label as diagnostics and is empty when it is unknown.
+	Line   int
+	Source string
 }
 
 // ModelGroup is a content model compositor (sequence, choice, all).

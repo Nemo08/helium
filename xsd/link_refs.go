@@ -230,6 +230,11 @@ func (c *compiler) resolveRefs(ctx context.Context) {
 					edecl.Fixed = ge.Fixed
 					edecl.FixedNS = ge.FixedNS
 				}
+				// A ref use inherits the global declaration's annotation only
+				// when the ref form carries none of its own.
+				if edecl.Annotation == nil {
+					edecl.Annotation = ge.Annotation
+				}
 				// Copy the referenced declaration's substitution-group
 				// affiliation. A no-type substitution-group member leaves
 				// edecl.Type nil here; without the affiliation, effectiveDeclType
@@ -704,6 +709,11 @@ func (c *compiler) resolveRefs(ctx context.Context) {
 		}
 		if au.Type == nil {
 			au.Type = ga.Type
+		}
+		// A ref use inherits the global declaration's annotation only when the
+		// ref form carries none of its own.
+		if au.Annotation == nil {
+			au.Annotation = ga.Annotation
 		}
 		// XSD 1.1 {inheritable}: a ref use without an explicit inheritable adopts
 		// the referenced global declaration's value; an explicit one already won.
