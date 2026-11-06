@@ -673,6 +673,8 @@ type AttrUse struct {
 	DefaultNS map[string]string
 	// Annotation is the component's xs:annotation snapshot, or nil.
 	Annotation *Annotation
+	// IsRef is true when the use was created from a ref="..." attribute.
+	IsRef bool
 	// Line and Source locate the declaring schema element. Source uses the same
 	// display label as diagnostics and is empty when it is unknown.
 	Line   int

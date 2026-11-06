@@ -1084,6 +1084,7 @@ func (c *compiler) parseAttributeUse(ctx context.Context, elem *helium.Element) 
 		}
 		au := &AttrUse{
 			Name:       qn,
+			IsRef:      true,
 			Annotation: c.readAnnotation(elem),
 			Line:       elem.Line(),
 			Source:     c.diagSource(),
