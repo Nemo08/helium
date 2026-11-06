@@ -74,12 +74,17 @@ type Schema struct {
 	// annotation has no struct field to live on.
 	groupAnnotations     map[QName]*Annotation
 	attrGroupAnnotations map[QName]*Annotation
-	globalAttrs       map[QName]*AttrUse
-	notations         map[QName]*Notation
-	substGroups       map[QName][]*ElementDecl // head QName → member element declarations
-	loaderFS          fs.FS
-	loaderBaseDir     string
-	loaderParser      *helium.Parser
+	// annotations holds the xs:schema-level xs:annotation snapshots of every
+	// document in the assembly (root plus includes; imports are appended during
+	// the merge). XSD allows more than one annotation on xs:schema, so this is a
+	// slice in load/document order. Component annotations live on the components.
+	annotations   []*Annotation
+	globalAttrs   map[QName]*AttrUse
+	notations     map[QName]*Notation
+	substGroups   map[QName][]*ElementDecl // head QName → member element declarations
+	loaderFS      fs.FS
+	loaderBaseDir string
+	loaderParser  *helium.Parser
 	// substClosures is the precomputed substitution-group closure of every
 	// global element declaration with a non-empty closure, keyed by the head's
 	// QName. nil until buildSubstClosures runs (at the end of compileSchema);
@@ -121,6 +126,13 @@ func (s *Schema) LookupAttribute(local, ns string) (*AttrUse, bool) {
 // NamedTypes returns the schema's named type definitions.
 func (s *Schema) NamedTypes() []QName {
 	return sortedQNames(s.types)
+}
+
+// Annotations returns the xs:schema-level xs:annotation snapshots of every
+// document in the assembly, in load order. XSD permits more than one annotation
+// on xs:schema. Component annotations are exposed on the components instead.
+func (s *Schema) Annotations() []*Annotation {
+	return slices.Clone(s.annotations)
 }
 
 // GlobalElements returns the schema's global element declarations, ordered by
@@ -327,12 +339,14 @@ func (e *ElementDecl) setSubstitutionGroupHeads(heads []QName) {
 // the test holds. It mirrors Assertion's capture pattern.
 type TypeAlternative struct {
 	Test       string
-	Namespaces map[string]string  // prefix → URI from the schema document
-	Line       int                // source line of the xs:alternative element
-	Source     string             // source filename of the declaring schema document
-	BaseURI    string             // schema document URI, exposed as the XPath static base URI
-	TypeName   QName              // the @type reference (resolved into Type during resolveRefs)
-	Type       *TypeDef           // resolved governing type
+	Namespaces map[string]string // prefix → URI from the schema document
+	Line       int               // source line of the xs:alternative element
+	Source     string            // source filename of the declaring schema document
+	BaseURI    string            // schema document URI, exposed as the XPath static base URI
+	TypeName   QName             // the @type reference (resolved into Type during resolveRefs)
+	Type       *TypeDef          // resolved governing type
+	// Annotation is the xs:alternative's xs:annotation snapshot, or nil.
+	Annotation *Annotation
 	compiled   *xpath3.Expression // pre-compiled @test; nil for a testless default (or compile failure)
 }
 
@@ -358,6 +372,13 @@ type IDConstraint struct {
 	Namespaces map[string]string // prefix → URI from the schema document (for XPath evaluation)
 	Line       int               // source line of the constraint element (for error reporting)
 	Source     string            // source filename of the declaring schema document (for error reporting); paired with Line so a deferred @refer error on an IMPORTED constraint cites the imported file, not the importing compiler's filename
+	// Annotation is the xs:unique/xs:key/xs:keyref xs:annotation snapshot, or nil.
+	Annotation *Annotation
+	// SelectorAnnotation is the xs:selector's own xs:annotation, or nil.
+	SelectorAnnotation *Annotation
+	// FieldAnnotations is index-aligned with Fields: entry i is the xs:annotation
+	// of the i-th xs:field (nil when it has none).
+	FieldAnnotations []*Annotation
 
 	SelectorExpr *xpath1.Expression   // pre-compiled selector XPath
 	FieldExprs   []*xpath1.Expression // pre-compiled field XPaths (parallel to Fields)
@@ -409,6 +430,15 @@ type Annotation struct {
 	Documentation []Documentation
 	Line          int    // source line of the xs:annotation element
 	Source        string // declaring schema document label, as used in diagnostics
+	// RawXML is the whole xs:annotation element serialized into a self-contained
+	// fragment: the writer re-declares every namespace prefix the subtree uses, so
+	// it can be parsed without the surrounding document. It is the lossless escape
+	// hatch for everything the typed fields above do not model: xs:annotation/@id,
+	// foreign attributes, markup inside xs:documentation, and unknown children.
+	// Entity references are preserved as written (&name;); resolving them still
+	// needs the DTD in force where the schema was parsed, so a reference declared
+	// in an external DTD keeps AppInfo.InnerXML's limitation.
+	RawXML string
 }
 
 // AppInfo is one xs:appinfo child of an xs:annotation.
@@ -441,6 +471,14 @@ type Documentation struct {
 type FacetAnnotation struct {
 	Kind       string // facet local name: pattern, enumeration, minInclusive, ...
 	Value      string // raw @value, if present
+	Annotation *Annotation
+}
+
+// DerivationAnnotation records the xs:annotation of one derivation element
+// inside a type definition. Kind is the element's local name: simpleContent,
+// complexContent, restriction, extension, list, or union.
+type DerivationAnnotation struct {
+	Kind       string
 	Annotation *Annotation
 }
 
@@ -559,6 +597,11 @@ type TypeDef struct {
 
 	// Annotation is the type's xs:annotation snapshot, or nil.
 	Annotation *Annotation
+	// DerivationAnnotations holds the xs:annotation of the derivation elements
+	// that shape this type (xs:simpleContent, xs:complexContent, xs:restriction,
+	// xs:extension, xs:list, xs:union), in document order. The type's own
+	// xs:annotation is Annotation above; this slice covers the nested wrappers.
+	DerivationAnnotations []DerivationAnnotation
 	// Line and Source locate the declaring xs:complexType/xs:simpleType.
 	// Source uses the same display label as diagnostics and is empty when it is
 	// unknown.
@@ -585,24 +628,28 @@ type OpenContent struct {
 	// <xs:defaultOpenContent>: when false (the default), the default open content
 	// is NOT applied to a complex type whose effective content type is empty.
 	AppliesToEmpty bool
+	// Annotation is the xs:openContent/xs:defaultOpenContent xs:annotation
+	// snapshot, or nil. A value synthesized by extension merge keeps the local
+	// effective open content's annotation (the base's is not copied).
+	Annotation *Annotation
 }
 
 // FacetSet holds facet constraints for a simple type restriction.
 type FacetSet struct {
-	Enumeration       []string
-	EnumerationNS     []map[string]string
+	Enumeration   []string
+	EnumerationNS []map[string]string
 	// EnumerationAnnotations is index-aligned with Enumeration/EnumerationNS:
 	// entry i is the xs:annotation of the i-th xs:enumeration (nil when it has
 	// none). Position, not value, identifies a duplicate enumeration value.
 	EnumerationAnnotations []*Annotation
-	MinInclusive      *string
-	MaxInclusive      *string
-	MinExclusive      *string
-	MaxExclusive      *string
-	MinInclusiveFixed bool
-	MaxInclusiveFixed bool
-	MinExclusiveFixed bool
-	MaxExclusiveFixed bool
+	MinInclusive           *string
+	MaxInclusive           *string
+	MinExclusive           *string
+	MaxExclusive           *string
+	MinInclusiveFixed      bool
+	MaxInclusiveFixed      bool
+	MinExclusiveFixed      bool
+	MaxExclusiveFixed      bool
 	// MinInclusiveNS/MaxInclusiveNS/MinExclusiveNS/MaxExclusiveNS hold the
 	// in-scope namespace bindings (prefix → URI) captured at the point each
 	// individual range-facet bound was declared in the schema document. Each
@@ -687,6 +734,12 @@ type ModelGroup struct {
 	Particles  []*Particle
 	MinOccurs  int
 	MaxOccurs  int
+	// Annotation is the xs:annotation of the xs:sequence/xs:choice/xs:all (or the
+	// xs:group reference) this group was read from, or nil. Synthesized groups
+	// (content-model merge, group expansion, open-content placeholders) carry no
+	// annotation: they have no single source element. A named xs:group
+	// DEFINITION's annotation lives on Schema.GroupAnnotation instead.
+	Annotation *Annotation
 }
 
 // ParticleTerm is an interface satisfied by *ElementDecl, *ModelGroup, and *Wildcard.
@@ -759,4 +812,11 @@ type Wildcard struct {
 	// names, resolved after the content model is built.
 	NotQNameDefinedSibling bool
 	SiblingNames           []QName
+	// Annotation is the xs:any/xs:anyAttribute xs:annotation snapshot, or nil.
+	// Wildcards synthesized by namespace algebra carry no annotation.
+	Annotation *Annotation
+	// Line and Source locate the declaring xs:any/xs:anyAttribute. Source uses
+	// the same display label as diagnostics and is empty when it is unknown.
+	Line   int
+	Source string
 }

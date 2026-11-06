@@ -509,12 +509,24 @@ func (c *compiler) parseComplexContent(ctx context.Context, elem *helium.Element
 	// it in both XSD 1.0 and 1.1. For a VALID wrapper (one derivation) the dispatch
 	// is identical to the old lenient loop; only zero/second/stray/trailing children
 	// (all invalid per the spec) are now rejected instead of silently tolerated.
-	return c.parseDerivationWrapper(ctx, elem, component, func(ce *helium.Element, kind DerivationKind) error {
+	return c.parseDerivationWrapper(ctx, elem, td, component, func(ce *helium.Element, kind DerivationKind) error {
 		if kind == DerivationRestriction {
 			return c.parseRestriction(ctx, ce, td, component)
 		}
 		return c.parseExtension(ctx, ce, td, component)
 	})
+}
+
+// recordDerivationAnnotation appends the xs:annotation of a derivation element
+// (simpleContent, complexContent, restriction, extension, list, union) to the
+// type definition it shapes.
+func (c *compiler) recordDerivationAnnotation(td *TypeDef, elem *helium.Element) {
+	if ann := c.readAnnotation(elem); ann != nil {
+		td.DerivationAnnotations = append(td.DerivationAnnotations, DerivationAnnotation{
+			Kind:       elem.LocalName(),
+			Annotation: ann,
+		})
+	}
 }
 
 // parseDerivationWrapper enforces the schema-for-schemas content model
@@ -527,7 +539,7 @@ func (c *compiler) parseComplexContent(ctx context.Context, elem *helium.Element
 // for a valid wrapper (one derivation) the dispatch is identical to the old lenient
 // loops, so only the invalid forms are newly rejected in 1.0. Centralizing it keeps
 // the complexContent and simpleContent wrappers from diverging.
-func (c *compiler) parseDerivationWrapper(ctx context.Context, wrapper *helium.Element, component string, dispatch func(ce *helium.Element, kind DerivationKind) error) error {
+func (c *compiler) parseDerivationWrapper(ctx context.Context, wrapper *helium.Element, td *TypeDef, component string, dispatch func(ce *helium.Element, kind DerivationKind) error) error {
 	report := func(ce *helium.Element, what string) {
 		if c.filename == "" {
 			return
@@ -551,6 +563,9 @@ func (c *compiler) parseDerivationWrapper(ctx context.Context, wrapper *helium.E
 				report(ce, fmt.Sprintf("An 'annotation' in '%s' must appear before the 'restriction' or 'extension'.", wrapper.LocalName()))
 			} else if annotationSeen {
 				report(ce, fmt.Sprintf("A '%s' must not have more than one 'annotation'.", wrapper.LocalName()))
+			}
+			if !annotationSeen {
+				c.recordDerivationAnnotation(td, wrapper)
 			}
 			annotationSeen = true
 			continue
@@ -579,12 +594,14 @@ func (c *compiler) parseDerivationWrapper(ctx context.Context, wrapper *helium.E
 
 func (c *compiler) parseRestriction(ctx context.Context, elem *helium.Element, td *TypeDef, component string) error {
 	td.Derivation = DerivationRestriction
+	c.recordDerivationAnnotation(td, elem)
 	c.recordDerivationBaseRef(ctx, elem, td)
 	return c.parseComplexContentDerivationBody(ctx, elem, td, DerivationRestriction, component)
 }
 
 func (c *compiler) parseExtension(ctx context.Context, elem *helium.Element, td *TypeDef, component string) error {
 	td.Derivation = DerivationExtension
+	c.recordDerivationAnnotation(td, elem)
 	c.recordDerivationBaseRef(ctx, elem, td)
 	return c.parseComplexContentDerivationBody(ctx, elem, td, DerivationExtension, component)
 }
@@ -827,7 +844,7 @@ func (c *compiler) parseSimpleContent(ctx context.Context, elem *helium.Element,
 	// annotation only before it, nothing else (e.g. a direct trailing <xs:openContent>
 	// is rejected). For a VALID wrapper (one derivation) the dispatch is identical to
 	// the old lenient loop; only zero/second/stray/trailing children are now rejected.
-	_ = c.parseDerivationWrapper(ctx, elem, component, func(ce *helium.Element, kind DerivationKind) error {
+	_ = c.parseDerivationWrapper(ctx, elem, td, component, func(ce *helium.Element, kind DerivationKind) error {
 		c.dispatchSimpleContentDerivation(ctx, ce, td, kind, component)
 		return nil
 	})
@@ -838,6 +855,7 @@ func (c *compiler) parseSimpleContent(ctx context.Context, elem *helium.Element,
 // lenient loop and the XSD 1.1 strict wrapper so both behave identically once a
 // derivation is selected.
 func (c *compiler) dispatchSimpleContentDerivation(ctx context.Context, ce *helium.Element, td *TypeDef, kind DerivationKind, component string) {
+	c.recordDerivationAnnotation(td, ce)
 	// @base is an xs:QName: dispatch on PRESENCE via resolveQNameRef so a
 	// PRESENT-but-empty base="" (or whitespace-only) is reported once as an invalid
 	// QName, not silently treated as absent.
@@ -1212,6 +1230,7 @@ func (c *compiler) parseSimpleType(ctx context.Context, elem *helium.Element, lo
 			continue
 		}
 		derivationChild = ce.LocalName()
+		c.recordDerivationAnnotation(td, ce)
 		switch {
 		case isXSDElement(ce, elemRestriction):
 			c.checkSimpleTypeDerivationBody(ctx, elem, ce)

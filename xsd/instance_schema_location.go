@@ -4,6 +4,7 @@ import (
 	"context"
 	"io/fs"
 	"maps"
+	"slices"
 
 	helium "github.com/lestrrat-go/helium"
 	"github.com/lestrrat-go/helium/internal/iofs"
@@ -139,6 +140,7 @@ func cloneSchemaSymbolTables(s *Schema) *Schema {
 	cp.attrGroups = maps.Clone(s.attrGroups)
 	cp.groupAnnotations = maps.Clone(s.groupAnnotations)
 	cp.attrGroupAnnotations = maps.Clone(s.attrGroupAnnotations)
+	cp.annotations = slices.Clone(s.annotations)
 	cp.notations = maps.Clone(s.notations)
 	cp.globalAttrs = maps.Clone(s.globalAttrs)
 	cp.substGroups = maps.Clone(s.substGroups)
@@ -183,6 +185,10 @@ func mergeHintSchema(dst, src *Schema) {
 			dst.notations[qn] = n
 		}
 	}
+	// Schema-level annotations have no QName identity, so they are appended in
+	// load order rather than deduplicated (the same document is normally loaded
+	// once; a repeated hint merge repeats its annotations).
+	dst.annotations = append(dst.annotations, src.annotations...)
 	for qn, members := range src.substGroups {
 		if len(members) == 0 {
 			continue

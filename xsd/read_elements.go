@@ -399,6 +399,9 @@ func (c *compiler) readWildcard(ctx context.Context, elem *helium.Element) *Wild
 		Namespace:       namespace,
 		ProcessContents: c.readProcessContents(ctx, elem),
 		TargetNS:        c.schema.targetNamespace,
+		Annotation:      c.readAnnotation(elem),
+		Line:            elem.Line(),
+		Source:          c.diagSource(),
 	}
 
 	// XSD 1.1 negated namespace / name constraints. XSD 1.0 does not define
@@ -1275,6 +1278,7 @@ func (c *compiler) parseIDConstraint(ctx context.Context, elem *helium.Element, 
 			Namespaces:      collectNSContext(elem),
 			Line:            elem.Line(),
 			Source:          source,
+			Annotation:      c.readAnnotation(elem),
 			IsConstraintRef: true,
 			ConstraintRef:   ref,
 		}
@@ -1301,6 +1305,7 @@ func (c *compiler) parseIDConstraint(ctx context.Context, elem *helium.Element, 
 		Namespaces: collectNSContext(elem),
 		Line:       elem.Line(),
 		Source:     source,
+		Annotation: c.readAnnotation(elem),
 	}
 	// @refer is permitted ONLY on xs:keyref (XSD Structures 3.11.1). A key or
 	// unique carrying @refer is a schema error.
@@ -1383,6 +1388,7 @@ func (c *compiler) parseIDConstraint(ctx context.Context, elem *helium.Element, 
 			selectorLine = ce.Line()
 			selectorNS = collectNSContext(ce)
 			idc.Selector = c.idcXPathAttr(ctx, ce, elemSelector)
+			idc.SelectorAnnotation = c.readAnnotation(ce)
 		case isXSDElement(ce, elemField):
 			// fields follow the selector.
 			if !selectorSeen {
@@ -1392,6 +1398,7 @@ func (c *compiler) parseIDConstraint(ctx context.Context, elem *helium.Element, 
 			fieldLines = append(fieldLines, ce.Line())
 			fieldNS = append(fieldNS, collectNSContext(ce))
 			idc.Fields = append(idc.Fields, c.idcXPathAttr(ctx, ce, elemField))
+			idc.FieldAnnotations = append(idc.FieldAnnotations, c.readAnnotation(ce))
 		default:
 			// Any other element child is not in the content model. The
 			// (annotation?, (selector, field+)) model has NO element wildcard, so

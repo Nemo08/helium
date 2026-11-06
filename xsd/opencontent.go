@@ -65,7 +65,7 @@ func (c *compiler) materializeOpenContentSiblings(oc *OpenContent, td *TypeDef) 
 	}
 	wc := *oc.Wildcard
 	wc.SiblingNames = siblings
-	return &OpenContent{Mode: oc.Mode, Wildcard: &wc, AppliesToEmpty: oc.AppliesToEmpty}
+	return &OpenContent{Mode: oc.Mode, Wildcard: &wc, AppliesToEmpty: oc.AppliesToEmpty, Annotation: oc.Annotation}
 }
 
 // computeEffectiveOpenContent resolves a single complex type's {open content}:
@@ -117,7 +117,7 @@ func (c *compiler) localEffectiveOpenContent(td *TypeDef) *OpenContent {
 	} else if td.pendingDefaultOpenContent != nil {
 		def := td.pendingDefaultOpenContent
 		if def.AppliesToEmpty || !contentTypeEmptyForOpenContent(td) {
-			eff = &OpenContent{Mode: def.Mode, Wildcard: def.Wildcard}
+			eff = &OpenContent{Mode: def.Mode, Wildcard: def.Wildcard, Annotation: def.Annotation}
 		}
 	}
 	// Materialize ##definedSibling SiblingNames on the local effective open content
@@ -143,7 +143,7 @@ func mergeExtensionOpenContent(baseOC, eff *OpenContent, version Version) *OpenC
 		if baseOC.Mode == OpenContentInterleave {
 			mode = OpenContentInterleave
 		}
-		return &OpenContent{Mode: mode, Wildcard: wildcardUnion(baseOC.Wildcard, eff.Wildcard, version)}
+		return &OpenContent{Mode: mode, Wildcard: wildcardUnion(baseOC.Wildcard, eff.Wildcard, version), Annotation: eff.Annotation}
 	}
 }
 
@@ -978,7 +978,7 @@ func (c *compiler) parseOpenContent(ctx context.Context, elem *helium.Element) *
 	if wc == nil {
 		return nil
 	}
-	return &OpenContent{Mode: mode, Wildcard: wc}
+	return &OpenContent{Mode: mode, Wildcard: wc, Annotation: c.readAnnotation(elem)}
 }
 
 // openContentOrderViolation returns the schema-error message when an
@@ -1182,7 +1182,7 @@ func (c *compiler) readDefaultOpenContent(ctx context.Context, root *helium.Elem
 	if wc == nil {
 		return nil
 	}
-	return &OpenContent{Mode: mode, Wildcard: wc, AppliesToEmpty: appliesToEmpty}
+	return &OpenContent{Mode: mode, Wildcard: wc, AppliesToEmpty: appliesToEmpty, Annotation: c.readAnnotation(dec)}
 }
 
 // collectModelElementNames returns the set of element expanded names declared

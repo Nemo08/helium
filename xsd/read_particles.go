@@ -456,6 +456,7 @@ func (c *compiler) parseModelGroup(ctx context.Context, elem *helium.Element, co
 		Compositor: compositor,
 		MinOccurs:  minOccurs,
 		MaxOccurs:  maxOccurs,
+		Annotation: c.readAnnotation(elem),
 	}
 
 	// The XML representation of an inline model group has the content model
@@ -634,8 +635,9 @@ func (c *compiler) parseModelGroup(ctx context.Context, elem *helium.Element, co
 				placeholderMin, placeholderMax := parseParticleOccurs(ce)
 				// Group reference — create a placeholder model group.
 				placeholder := &ModelGroup{
-					MinOccurs: placeholderMin,
-					MaxOccurs: placeholderMax,
+					MinOccurs:  placeholderMin,
+					MaxOccurs:  placeholderMax,
+					Annotation: c.readAnnotation(ce),
 				}
 				qn := c.resolveQName(ctx, ce, attrRef, ref)
 				c.groupRefs[placeholder] = qn

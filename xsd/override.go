@@ -680,6 +680,11 @@ func (c *compiler) overrideParseTargetChildren(ctx context.Context, root *helium
 			// xs:NOTATION-restriction enumeration can resolve against it (mirroring
 			// parseSchemaChildren). An overridden one was suppressed above.
 			c.collectNotation(elem)
+		case isXSDElement(elem, elemAnnotation):
+			// The target document's xs:schema-level annotations are metadata, not
+			// overridable components; record them in document order (mirroring
+			// parseSchemaChildren).
+			c.schema.annotations = append(c.schema.annotations, c.readAnnotationElement(elem))
 		}
 	}
 	return nil

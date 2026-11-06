@@ -18,6 +18,12 @@ func (c *compiler) readAnnotation(elem *helium.Element) *Annotation {
 	if annElem == nil {
 		return nil
 	}
+	return c.readAnnotationElement(annElem)
+}
+
+// readAnnotationElement snapshots one xs:annotation element. It never fails and
+// never emits diagnostics.
+func (c *compiler) readAnnotationElement(annElem *helium.Element) *Annotation {
 	ann := &Annotation{
 		Line:   annElem.Line(),
 		Source: c.diagSource(),
@@ -34,7 +40,22 @@ func (c *compiler) readAnnotation(elem *helium.Element) *Annotation {
 			ann.Documentation = append(ann.Documentation, readDocumentation(ce))
 		}
 	}
+	ann.RawXML = serializeAnnotation(annElem)
 	return ann
+}
+
+// serializeAnnotation serializes the whole xs:annotation element into a
+// self-contained fragment: the writer re-declares every namespace prefix the
+// subtree uses, so the result can be parsed without the surrounding document.
+// A node that was parsed successfully is always serializable; if that ever
+// fails, the typed fields remain available and RawXML is left empty rather than
+// failing compilation over annotation metadata.
+func serializeAnnotation(annElem *helium.Element) string {
+	var buf strings.Builder
+	if err := helium.NewWriter().WriteTo(&buf, annElem); err != nil {
+		return ""
+	}
+	return buf.String()
 }
 
 // firstXSDElementChild returns the first direct child element in the XSD

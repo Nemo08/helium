@@ -657,16 +657,16 @@ func compileSchema(ctx context.Context, doc *helium.Document, baseDir string, cf
 	}
 	c := &compiler{
 		schema: &Schema{
-			elements:      make(map[QName]*ElementDecl),
-			types:         make(map[QName]*TypeDef, typesMapSizeHint),
-			groups:        make(map[QName]*ModelGroup),
-			attrGroups:    make(map[QName][]*AttrUse),
-			globalAttrs:   make(map[QName]*AttrUse),
-			substGroups:   make(map[QName][]*ElementDecl),
-			notations:     make(map[QName]*Notation),
-			loaderFS:      fsys,
-			loaderBaseDir: baseDir,
-			loaderParser:  parser,
+			elements:             make(map[QName]*ElementDecl),
+			types:                make(map[QName]*TypeDef, typesMapSizeHint),
+			groups:               make(map[QName]*ModelGroup),
+			attrGroups:           make(map[QName][]*AttrUse),
+			globalAttrs:          make(map[QName]*AttrUse),
+			substGroups:          make(map[QName][]*ElementDecl),
+			notations:            make(map[QName]*Notation),
+			loaderFS:             fsys,
+			loaderBaseDir:        baseDir,
+			loaderParser:         parser,
 			groupAnnotations:     make(map[QName]*Annotation),
 			attrGroupAnnotations: make(map[QName]*Annotation),
 		},
@@ -1239,9 +1239,11 @@ func (c *compiler) resolveConstraintRefs(ctx context.Context) {
 		idc.Selector = target.Selector
 		idc.SelectorExpr = target.SelectorExpr
 		idc.SelectorDefaultNS = target.SelectorDefaultNS
+		idc.SelectorAnnotation = target.SelectorAnnotation
 		idc.Fields = target.Fields
 		idc.FieldExprs = target.FieldExprs
 		idc.FieldDefaultNS = target.FieldDefaultNS
+		idc.FieldAnnotations = target.FieldAnnotations
 		idc.Namespaces = target.Namespaces
 		if idc.Kind == IDCKeyRef {
 			idc.Refer = target.Refer
@@ -1430,6 +1432,9 @@ func (c *compiler) parseSchemaChildren(ctx context.Context, root *helium.Element
 			c.parseGlobalAttribute(ctx, elem)
 		case isXSDElement(elem, elemNotation):
 			c.collectNotation(elem)
+		case isXSDElement(elem, elemAnnotation):
+			// xs:schema admits several annotations; record them in document order.
+			c.schema.annotations = append(c.schema.annotations, c.readAnnotationElement(elem))
 		default:
 			// The xs:schema content model is a closed vocabulary of top-level
 			// components plus the composition/annotation elements handled before

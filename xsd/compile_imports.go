@@ -2372,6 +2372,9 @@ func (c *compiler) loadImport(ctx context.Context, location, ns string, importEl
 		c.attrRefSources[au] = src
 	}
 	maps.Copy(c.notations, impC.notations)
+	// The imported document's own schema-level annotations join the assembly's
+	// list, mirroring how include documents contribute theirs.
+	c.schema.annotations = append(c.schema.annotations, impC.schema.annotations...)
 	// Merge attribute-use default/fixed constraint sources, preserving the
 	// originating file. An attribute use parsed directly in the imported document
 	// (not via a nested include) has an empty source; attribute it to the
