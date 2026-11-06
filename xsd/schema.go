@@ -296,6 +296,53 @@ type Assertion struct {
 	compiled   *xpath3.Expression // pre-compiled @test; nil if the expression failed to compile
 }
 
+// Annotation is a snapshot of one component's xs:annotation child. It holds
+// only the parts a consumer typically needs (text and appinfo payload), not a
+// live DOM reference: a compiled Schema is immutable and disconnected from the
+// documents it was built from, and keeping a node would retain the whole
+// include/import tree for the lifetime of the schema.
+//
+// A nil *Annotation means the component carries no xs:annotation.
+type Annotation struct {
+	AppInfos      []AppInfo
+	Documentation []Documentation
+	Line          int    // source line of the xs:annotation element
+	Source        string // declaring schema document label, as used in diagnostics
+}
+
+// AppInfo is one xs:appinfo child of an xs:annotation.
+type AppInfo struct {
+	Source string // @source, if present
+	// InnerXML is the serialized child content of the xs:appinfo element.
+	// Entity references are preserved as written (&name;), so the fragment is
+	// only self-contained together with Namespaces (and, for references
+	// declared in an external DTD, the original document context).
+	InnerXML string
+	// Namespaces holds the in-scope prefix → URI bindings at the xs:appinfo
+	// element, including namespaces declared on ancestors.
+	Namespaces map[string]string
+}
+
+// Documentation is one xs:documentation child of an xs:annotation.
+type Documentation struct {
+	ID     string // xml:id (an unqualified id is accepted as a fallback)
+	Lang   string // xml:lang
+	Source string // @source
+	// Text is the whitespace-trimmed character data owned by the element,
+	// with entity references expanded. Markup children (e.g. XHTML) are not
+	// included.
+	Text string
+}
+
+// FacetAnnotation records the xs:annotation of a single facet inside one
+// restriction step. FacetSet.Annotations preserves document order; there may be
+// several facets of the same kind (notably xs:enumeration).
+type FacetAnnotation struct {
+	Kind       string // facet local name: pattern, enumeration, minInclusive, ...
+	Value      string // raw @value, if present
+	Annotation *Annotation
+}
+
 // DerivationKind describes how a type is derived from its base.
 type DerivationKind int
 
