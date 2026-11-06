@@ -75,6 +75,7 @@ type Schema struct {
 	groupAnnotations     map[QName]*Annotation
 	attrGroupAnnotations map[QName]*Annotation
 	globalAttrs       map[QName]*AttrUse
+	notations         map[QName]*Notation
 	substGroups       map[QName][]*ElementDecl // head QName → member element declarations
 	loaderFS          fs.FS
 	loaderBaseDir     string
@@ -119,29 +120,115 @@ func (s *Schema) LookupAttribute(local, ns string) (*AttrUse, bool) {
 
 // NamedTypes returns the schema's named type definitions.
 func (s *Schema) NamedTypes() []QName {
-	if len(s.types) == 0 {
+	return sortedQNames(s.types)
+}
+
+// GlobalElements returns the schema's global element declarations, ordered by
+// QName.
+func (s *Schema) GlobalElements() []*ElementDecl {
+	names := sortedQNames(s.elements)
+	if len(names) == 0 {
 		return nil
 	}
-	names := make([]QName, 0, len(s.types))
-	for qn := range s.types {
+	decls := make([]*ElementDecl, 0, len(names))
+	for _, qn := range names {
+		decls = append(decls, s.elements[qn])
+	}
+	return decls
+}
+
+// GlobalAttributes returns the schema's global attribute declarations, ordered
+// by QName.
+func (s *Schema) GlobalAttributes() []*AttrUse {
+	names := sortedQNames(s.globalAttrs)
+	if len(names) == 0 {
+		return nil
+	}
+	attrs := make([]*AttrUse, 0, len(names))
+	for _, qn := range names {
+		attrs = append(attrs, s.globalAttrs[qn])
+	}
+	return attrs
+}
+
+// LookupGroup returns the named model group definition for the given name.
+func (s *Schema) LookupGroup(local, ns string) (*ModelGroup, bool) {
+	g, ok := s.groups[QName{Local: local, NS: ns}]
+	return g, ok
+}
+
+// GlobalGroups returns the names of the schema's named model groups, ordered by
+// QName.
+func (s *Schema) GlobalGroups() []QName {
+	return sortedQNames(s.groups)
+}
+
+// GroupAnnotation returns the xs:annotation of the named model group
+// definition, or nil. The annotation belongs to the definition, not to a
+// compositor: xs:group is a wrapper element that has no component of its own.
+func (s *Schema) GroupAnnotation(local, ns string) *Annotation {
+	return s.groupAnnotations[QName{Local: local, NS: ns}]
+}
+
+// LookupAttributeGroup returns the attribute uses of the named attribute group
+// definition.
+func (s *Schema) LookupAttributeGroup(local, ns string) ([]*AttrUse, bool) {
+	attrs, ok := s.attrGroups[QName{Local: local, NS: ns}]
+	return attrs, ok
+}
+
+// GlobalAttributeGroups returns the names of the schema's named attribute
+// groups, ordered by QName.
+func (s *Schema) GlobalAttributeGroups() []QName {
+	return sortedQNames(s.attrGroups)
+}
+
+// AttributeGroupAnnotation returns the xs:annotation of the named attribute
+// group definition, or nil.
+func (s *Schema) AttributeGroupAnnotation(local, ns string) *Annotation {
+	return s.attrGroupAnnotations[QName{Local: local, NS: ns}]
+}
+
+// LookupNotation returns the global xs:notation declaration for the given name.
+func (s *Schema) LookupNotation(local, ns string) (*Notation, bool) {
+	n, ok := s.notations[QName{Local: local, NS: ns}]
+	return n, ok
+}
+
+// Notations returns the names of the schema's xs:notation declarations, ordered
+// by QName.
+func (s *Schema) Notations() []QName {
+	return sortedQNames(s.notations)
+}
+
+// sortedQNames returns the map's keys ordered by namespace, then local name, so
+// callers never observe map iteration order.
+func sortedQNames[T any](m map[QName]T) []QName {
+	if len(m) == 0 {
+		return nil
+	}
+	names := make([]QName, 0, len(m))
+	for qn := range m {
 		names = append(names, qn)
 	}
-	slices.SortFunc(names, func(a, b QName) int {
-		if a.NS != b.NS {
-			if a.NS < b.NS {
-				return -1
-			}
-			return 1
-		}
-		if a.Local < b.Local {
+	slices.SortFunc(names, compareQName)
+	return names
+}
+
+func compareQName(a, b QName) int {
+	if a.NS != b.NS {
+		if a.NS < b.NS {
 			return -1
 		}
-		if a.Local > b.Local {
-			return 1
-		}
-		return 0
-	})
-	return names
+		return 1
+	}
+	if a.Local < b.Local {
+		return -1
+	}
+	if a.Local > b.Local {
+		return 1
+	}
+	return 0
 }
 
 // TargetNamespace returns the schema's target namespace.
@@ -355,6 +442,18 @@ type FacetAnnotation struct {
 	Kind       string // facet local name: pattern, enumeration, minInclusive, ...
 	Value      string // raw @value, if present
 	Annotation *Annotation
+}
+
+// Notation is a global xs:notation declaration. A notation is not validated as
+// a component, but the declaration's identifiers and metadata are exposed so
+// callers do not have to re-read the schema document.
+type Notation struct {
+	Name       QName
+	PublicID   string // @public
+	SystemID   string // @system
+	Annotation *Annotation
+	Line       int
+	Source     string
 }
 
 // DerivationKind describes how a type is derived from its base.

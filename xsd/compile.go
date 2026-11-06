@@ -663,6 +663,7 @@ func compileSchema(ctx context.Context, doc *helium.Document, baseDir string, cf
 			attrGroups:    make(map[QName][]*AttrUse),
 			globalAttrs:   make(map[QName]*AttrUse),
 			substGroups:   make(map[QName][]*ElementDecl),
+			notations:     make(map[QName]*Notation),
 			loaderFS:      fsys,
 			loaderBaseDir: baseDir,
 			loaderParser:  parser,
@@ -1428,9 +1429,7 @@ func (c *compiler) parseSchemaChildren(ctx context.Context, root *helium.Element
 		case isXSDElement(elem, elemAttribute):
 			c.parseGlobalAttribute(ctx, elem)
 		case isXSDElement(elem, elemNotation):
-			if name := collapsedAttr(elem, attrName); name != "" {
-				c.notations[QName{Local: name, NS: c.schema.targetNamespace}] = struct{}{}
-			}
+			c.collectNotation(elem)
 		default:
 			// The xs:schema content model is a closed vocabulary of top-level
 			// components plus the composition/annotation elements handled before

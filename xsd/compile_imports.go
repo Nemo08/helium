@@ -2017,6 +2017,7 @@ func (c *compiler) loadImport(ctx context.Context, location, ns string, importEl
 
 			groupAnnotations:     make(map[QName]*Annotation),
 			attrGroupAnnotations: make(map[QName]*Annotation),
+			notations:            make(map[QName]*Notation),
 		},
 		version:                   c.version,
 		baseDir:                   schemaBaseDir(path),
@@ -2251,6 +2252,11 @@ func (c *compiler) loadImport(ctx context.Context, location, ns string, importEl
 	for qn, au := range impC.schema.globalAttrs {
 		if _, exists := c.schema.globalAttrs[qn]; !exists {
 			c.schema.globalAttrs[qn] = au
+		}
+	}
+	for qn, n := range impC.schema.notations {
+		if _, exists := c.schema.notations[qn]; !exists {
+			c.schema.notations[qn] = n
 		}
 	}
 

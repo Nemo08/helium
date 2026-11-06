@@ -355,10 +355,22 @@ func (c *compiler) registerOverrideChild(ctx context.Context, key overrideKey, e
 }
 
 // collectNotation records an <xs:notation>'s name in c.notations (in the current
-// document's target namespace), matching parseSchemaChildren's notation handling.
+// document's target namespace), matching parseSchemaChildren's notation handling,
+// and captures the public declaration in Schema.notations.
 func (c *compiler) collectNotation(elem *helium.Element) {
-	if name := collapsedAttr(elem, attrName); name != "" {
-		c.notations[QName{Local: name, NS: c.schema.targetNamespace}] = struct{}{}
+	name := collapsedAttr(elem, attrName)
+	if name == "" {
+		return
+	}
+	qn := QName{Local: name, NS: c.schema.targetNamespace}
+	c.notations[qn] = struct{}{}
+	c.schema.notations[qn] = &Notation{
+		Name:       qn,
+		PublicID:   getAttr(elem, attrPublic),
+		SystemID:   getAttr(elem, attrSystem),
+		Annotation: c.readAnnotation(elem),
+		Line:       elem.Line(),
+		Source:     c.diagSource(),
 	}
 }
 
