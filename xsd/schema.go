@@ -68,6 +68,12 @@ type Schema struct {
 	types             map[QName]*TypeDef
 	groups            map[QName]*ModelGroup
 	attrGroups        map[QName][]*AttrUse
+	// groupAnnotations and attrGroupAnnotations hold the xs:annotation of the
+	// named xs:group / xs:attributeGroup DEFINITIONS, keyed like groups and
+	// attrGroups. A group definition has no component of its own, so its
+	// annotation has no struct field to live on.
+	groupAnnotations     map[QName]*Annotation
+	attrGroupAnnotations map[QName]*Annotation
 	globalAttrs       map[QName]*AttrUse
 	substGroups       map[QName][]*ElementDecl // head QName → member element declarations
 	loaderFS          fs.FS
@@ -300,6 +306,8 @@ type Assertion struct {
 	Line       int                // source line of the xs:assert element
 	Source     string             // source filename of the declaring schema document
 	compiled   *xpath3.Expression // pre-compiled @test; nil if the expression failed to compile
+	// Annotation is the xs:assert/xs:assertion's xs:annotation snapshot, or nil.
+	Annotation *Annotation
 }
 
 // Annotation is a snapshot of one component's xs:annotation child. It holds
@@ -484,6 +492,10 @@ type OpenContent struct {
 type FacetSet struct {
 	Enumeration       []string
 	EnumerationNS     []map[string]string
+	// EnumerationAnnotations is index-aligned with Enumeration/EnumerationNS:
+	// entry i is the xs:annotation of the i-th xs:enumeration (nil when it has
+	// none). Position, not value, identifies a duplicate enumeration value.
+	EnumerationAnnotations []*Annotation
 	MinInclusive      *string
 	MaxInclusive      *string
 	MinExclusive      *string
@@ -529,6 +541,10 @@ type FacetSet struct {
 	// list type). Assertions from different derivation steps are all enforced
 	// (ANDed), handled by validateValue walking the base-type chain.
 	Assertions []*Assertion
+	// Annotations holds the xs:annotation of individual facets in document
+	// order. A facet that carries no xs:annotation contributes no entry, and a
+	// facet skipped as invalid or duplicated is not recorded.
+	Annotations []FacetAnnotation
 }
 
 // AttrUse represents an attribute use in a complex type definition.

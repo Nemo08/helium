@@ -137,6 +137,8 @@ func cloneSchemaSymbolTables(s *Schema) *Schema {
 	cp.types = maps.Clone(s.types)
 	cp.groups = maps.Clone(s.groups)
 	cp.attrGroups = maps.Clone(s.attrGroups)
+	cp.groupAnnotations = maps.Clone(s.groupAnnotations)
+	cp.attrGroupAnnotations = maps.Clone(s.attrGroupAnnotations)
 	cp.globalAttrs = maps.Clone(s.globalAttrs)
 	cp.substGroups = maps.Clone(s.substGroups)
 	// The struct copy above shares s.substClosures' map header. mergeHintSchema
@@ -161,11 +163,13 @@ func mergeHintSchema(dst, src *Schema) {
 	for qn, mg := range src.groups {
 		if _, exists := dst.groups[qn]; !exists {
 			dst.groups[qn] = mg
+			dst.groupAnnotations[qn] = src.groupAnnotations[qn]
 		}
 	}
 	for qn, attrs := range src.attrGroups {
 		if _, exists := dst.attrGroups[qn]; !exists {
 			dst.attrGroups[qn] = attrs
+			dst.attrGroupAnnotations[qn] = src.attrGroupAnnotations[qn]
 		}
 	}
 	for qn, au := range src.globalAttrs {

@@ -1488,6 +1488,7 @@ func (c *compiler) parseFacets(ctx context.Context, restriction *helium.Element)
 			nsCopy := make(map[string]string, len(nsCtx))
 			maps.Copy(nsCopy, nsCtx)
 			fs.EnumerationNS = append(fs.EnumerationNS, nsCopy)
+			fs.EnumerationAnnotations = append(fs.EnumerationAnnotations, c.readAnnotation(ce))
 		case facetMinInclusive:
 			if duplicateSingletonFacet(ce, facetMinInclusive) {
 				continue
@@ -1647,6 +1648,20 @@ func (c *compiler) parseFacets(ctx context.Context, restriction *helium.Element)
 				}
 				fs.Assertions = append(fs.Assertions, a)
 			}
+		}
+
+		// Record the facet's own annotation. Skipped facets (duplicates,
+		// invalid values, version-mismatched assertions) have already hit a
+		// continue above, so this runs only for facets that were recorded.
+		if ann := c.readAnnotation(ce); ann != nil {
+			if fs == nil {
+				fs = &FacetSet{}
+			}
+			fs.Annotations = append(fs.Annotations, FacetAnnotation{
+				Kind:       ce.LocalName(),
+				Value:      getAttr(ce, "value"),
+				Annotation: ann,
+			})
 		}
 	}
 

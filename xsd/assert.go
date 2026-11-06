@@ -57,6 +57,7 @@ func (c *compiler) parseAssertion(ctx context.Context, elem *helium.Element, ele
 		Namespaces: c.assertionNamespaces(elem),
 		Line:       elem.Line(),
 		Source:     c.diagSource(),
+		Annotation: c.readAnnotation(elem),
 	}
 	compiled, err := xpath3.NewCompiler().Compile(test)
 	if err != nil {

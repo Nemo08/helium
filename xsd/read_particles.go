@@ -124,6 +124,7 @@ func (c *compiler) parseNamedGroup(ctx context.Context, elem *helium.Element) er
 			source = c.includeFile
 		}
 		c.groupSources[qn] = groupSource{line: elem.Line(), source: source}
+		c.schema.groupAnnotations[qn] = c.readAnnotation(elem)
 	}
 	// The model group child is REQUIRED. A group carrying only an annotation (or
 	// only stray children) is invalid; suppress the duplicate diagnostic when a
@@ -309,6 +310,7 @@ func (c *compiler) parseNamedAttributeGroup(ctx context.Context, elem *helium.El
 		}
 	}
 	c.schema.attrGroups[qn] = attrs
+	c.schema.attrGroupAnnotations[qn] = c.readAnnotation(elem)
 	// Record the declaring source so the duplicate-attribute-use diagnostic cites
 	// the file the group was actually declared in: the include file when inside an
 	// include/redefine, else this compiler's filename (mirroring parseNamedGroup /

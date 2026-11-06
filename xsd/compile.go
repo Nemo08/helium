@@ -666,6 +666,8 @@ func compileSchema(ctx context.Context, doc *helium.Document, baseDir string, cf
 			loaderFS:      fsys,
 			loaderBaseDir: baseDir,
 			loaderParser:  parser,
+			groupAnnotations:     make(map[QName]*Annotation),
+			attrGroupAnnotations: make(map[QName]*Annotation),
 		},
 		baseDir:                   baseDir,
 		fsys:                      fsys,

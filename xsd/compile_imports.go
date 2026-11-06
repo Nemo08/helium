@@ -1892,6 +1892,7 @@ func (c *compiler) processRedefineOverrides(ctx context.Context, redefineElem *h
 				}
 			}
 			c.schema.attrGroups[qn] = attrs
+			c.schema.attrGroupAnnotations[qn] = c.readAnnotation(elem)
 			// Store the override's effective group wildcard: the group's own
 			// xs:anyAttribute INTERSECTED with the original wildcard a self-reference
 			// re-contributes. The type's "complete wildcard" further intersects the
@@ -2013,6 +2014,9 @@ func (c *compiler) loadImport(ctx context.Context, location, ns string, importEl
 			attrGroups:  make(map[QName][]*AttrUse),
 			globalAttrs: make(map[QName]*AttrUse),
 			substGroups: make(map[QName][]*ElementDecl),
+
+			groupAnnotations:     make(map[QName]*Annotation),
+			attrGroupAnnotations: make(map[QName]*Annotation),
 		},
 		version:                   c.version,
 		baseDir:                   schemaBaseDir(path),
@@ -2235,11 +2239,13 @@ func (c *compiler) loadImport(ctx context.Context, location, ns string, importEl
 	for qn, mg := range impC.schema.groups {
 		if _, exists := c.schema.groups[qn]; !exists {
 			c.schema.groups[qn] = mg
+			c.schema.groupAnnotations[qn] = impC.schema.groupAnnotations[qn]
 		}
 	}
 	for qn, attrs := range impC.schema.attrGroups {
 		if _, exists := c.schema.attrGroups[qn]; !exists {
 			c.schema.attrGroups[qn] = attrs
+			c.schema.attrGroupAnnotations[qn] = impC.schema.attrGroupAnnotations[qn]
 		}
 	}
 	for qn, au := range impC.schema.globalAttrs {
