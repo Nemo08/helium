@@ -281,7 +281,7 @@ func fnApply(ctx context.Context, args []Sequence) (Sequence, error) {
 		return nil, &XPathError{Code: lexicon.ErrXPTY0004, Message: "apply() second argument must be array"}
 	}
 	if fi.Arity >= 0 && arr.Size() != fi.Arity {
-		return nil, &XPathError{Code: errCodeFOAP0001, Message: fmt.Sprintf("fn:apply: function has arity %d but array has %d members", fi.Arity, arr.Size())}
+		return nil, &XPathError{Code: lexicon.ErrFOAP0001, Message: fmt.Sprintf("fn:apply: function has arity %d but array has %d members", fi.Arity, arr.Size())}
 	}
 	members := arr.members0()
 	fnArgs := make([]Sequence, len(members))
@@ -373,12 +373,10 @@ func lookupFunctionItem(ctx context.Context, qv QNameValue, arity int) (Function
 		return FunctionItem{}, false
 	}
 
-	capturedCtx := ctx
 	var capturedEC *evalContext
 	if ec := getFnContext(ctx); ec != nil {
 		capturedECValue := *ec
 		capturedEC = &capturedECValue
-		capturedCtx = withFnContext(ctx, capturedEC)
 	}
 
 	var paramTypes []SequenceType
@@ -418,6 +416,11 @@ func lookupFunctionItem(ctx context.Context, qv QNameValue, arity int) (Function
 		},
 	}
 	fi.Invoke = func(ctx context.Context, callArgs []Sequence) (Sequence, error) {
+		invocationEC := functionInvocationEC(capturedEC, getFnContext(ctx))
+		callCtx := ctx
+		if invocationEC != nil {
+			callCtx = withFnContext(ctx, invocationEC)
+		}
 		if len(callArgs) != arity {
 			return nil, &XPathError{Code: lexicon.ErrXPTY0004, Message: fmt.Sprintf("fn:%s requires %d arguments, got %d", qv.Local, arity, len(callArgs))}
 		}
@@ -435,7 +438,7 @@ func lookupFunctionItem(ctx context.Context, qv QNameValue, arity int) (Function
 					// atomizing an element-only node, FOTY0013, FORG0001, …) and maps
 					// only a plain mismatch to XPTY0004 — the boolean
 					// coerceToSequenceType would collapse FOTY0012 into XPTY0004.
-					c, err := coerceFuncallArg(ctx, arg, paramTypes[i], qv.Local, i, capturedEC)
+					c, err := coerceFuncallArg(ctx, arg, paramTypes[i], qv.Local, i, invocationEC)
 					if err != nil {
 						return nil, err
 					}
@@ -444,7 +447,7 @@ func lookupFunctionItem(ctx context.Context, qv QNameValue, arity int) (Function
 			}
 			callArgs = coerced
 		}
-		return fn.Call(capturedCtx, callArgs)
+		return fn.Call(callCtx, callArgs)
 	}
 	return fi, true
 }

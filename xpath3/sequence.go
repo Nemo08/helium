@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/lestrrat-go/helium"
+	"github.com/lestrrat-go/helium/internal/lexicon"
 	"github.com/lestrrat-go/helium/internal/sequence"
 	ixpath "github.com/lestrrat-go/helium/internal/xpath"
 )
@@ -185,14 +186,30 @@ func atomizeStream(seq Sequence, yield func(AtomicValue) (bool, error)) error {
 // before a later element-only element is reached — and element-only / empty /
 // nilled nodes nested inside arrays are handled too.
 func atomizeStreamCont(seq Sequence, contentKindCheck atomizeItemCheck, yield func(AtomicValue) (bool, error)) (bool, error) {
+	return atomizeStreamChecked(seq, contentKindCheck, nil, yield)
+}
+
+// atomizeStreamChecked also checks work before consuming each sequence item
+// and array member, including empty members that contribute no atomic values.
+func atomizeStreamChecked(seq Sequence, contentKindCheck atomizeItemCheck, check func() error, yield func(AtomicValue) (bool, error)) (bool, error) {
+	if check != nil {
+		if err := check(); err != nil {
+			return false, err
+		}
+	}
 	if seq == nil {
 		return true, nil
 	}
 	for item := range seqItems(seq) {
+		if check != nil {
+			if err := check(); err != nil {
+				return false, err
+			}
+		}
 		// XPath 3.1: atomizing an array flattens its members
 		if arr, ok := item.(ArrayItem); ok {
 			for _, member := range arr.members0() {
-				cont, err := atomizeStreamCont(member, contentKindCheck, yield)
+				cont, err := atomizeStreamChecked(member, contentKindCheck, check, yield)
 				if err != nil {
 					return false, err
 				}
@@ -283,7 +300,7 @@ func atomizeListToken(tok, listItem string, ni NodeItem) (AtomicValue, error) {
 		qv, err := resolveQNameFromNode(tok, ni.Node, ni.QNameNoDefaultNS)
 		if err != nil {
 			return AtomicValue{}, &XPathError{
-				Code:    errCodeFORG0001,
+				Code:    lexicon.ErrFORG0001,
 				Message: fmt.Sprintf("invalid QName list item %q: %v", tok, err),
 			}
 		}
@@ -454,7 +471,7 @@ func EBV(seq Sequence) (bool, error) {
 	}
 
 	return false, &XPathError{
-		Code:    errCodeFORG0006,
+		Code:    lexicon.ErrFORG0006,
 		Message: "effective boolean value not defined for sequence of length > 1 starting with non-node",
 	}
 }
@@ -467,7 +484,7 @@ func ebvSingle(item Item) (bool, error) {
 		return true, nil
 	default:
 		return false, &XPathError{
-			Code:    errCodeFORG0006,
+			Code:    lexicon.ErrFORG0006,
 			Message: fmt.Sprintf("effective boolean value not defined for %T", item),
 		}
 	}
@@ -506,7 +523,7 @@ func ebvAtomic(v AtomicValue) (bool, error) {
 		}
 	}
 	return false, &XPathError{
-		Code:    errCodeFORG0006,
+		Code:    lexicon.ErrFORG0006,
 		Message: fmt.Sprintf("effective boolean value not defined for %s", v.TypeName),
 	}
 }

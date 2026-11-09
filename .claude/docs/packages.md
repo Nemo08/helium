@@ -608,7 +608,8 @@ XPath 3.1 expression parsing and evaluation.
   **Expression.EvaluateReuse(ctx, *EvalState, Node) → (Result, error)** — low-allocation evaluation;
   **Expression.DumpVM(io.Writer) → error** — compiled VM instruction dump
 - **Evaluator fluent setters** (each returns an updated copy; maps/slices cloned unless `EvalBorrowing`):
-  `Namespaces(map[string]string)`, `Variables(map[string]Sequence)`, `Functions(byLocal map[string]Function,
+  `Namespaces(map[string]string)`, `EnvironmentVariables(map[string]string)`, `Variables(map[string]Sequence)`,
+  `Functions(byLocal map[string]Function,
   byQName map[QualifiedName]Function)`, `VariableResolver(VariableResolver)`,
   `FunctionResolver(FunctionResolver)`, `OpLimit(int)`, `CurrentTime(time.Time)`,
   `ImplicitTimezone(*time.Location)`, `DefaultLanguage(string)`, `DefaultCollation(string)`,
@@ -624,6 +625,9 @@ XPath 3.1 expression parsing and evaluation.
   `AllowXML11Chars()`, `DocOrderCache(*DocOrderCache)`, `TraceWriter(io.Writer)`, `Parser(helium.Parser)` (XML
   parser used by `fn:parse-xml`/`fn:parse-xml-fragment`/`fn:doc`; supplies parse policy — limits, FS,
   XXE/network; unset → default `helium.NewParser()`)
+- `fn:environment-variable` and `fn:available-environment-variables` read only the map passed to
+  `Evaluator.EnvironmentVariables`. The default map is empty, so XPath and XSLT expressions cannot read process
+  environment variables unless the caller explicitly supplies them.
 - `Result` — wraps `Sequence`; methods: `Nodes()`, `IsBoolean()`, `IsNumber()`, `IsString()`, `IsAtomic()`, `Atomics()`,
   `Sequence()`, `EBV()`, `StringValue()`, `Copy()`
 - **Reuse:** `Evaluator.NewEvalState(Node) → *EvalState` builds reusable state; `Expression.EvaluateReuse`
@@ -767,6 +771,7 @@ XSLT 3.0 stylesheet compilation + transformation on helium DOM with `xpath3` eva
   **Invocation.WriteTo(ctx, io.Writer) → error** / **Invocation.ResolvedOutputDef() → *OutputDef** — terminal execution
   + resolved primary output metadata. `Serialize`/`WriteTo` serialize captured primary items directly when the
   effective method is `json` or `adaptive` and the principal document has no children.
+  An empty JSON result serializes as `null`.
 - **NewParameters() → *Parameters** — mutable XSLT parameter carrier keyed by expanded name
 - **TransformFunction(...TransformOption) → xpath3.Function** — standalone `fn:transform()` for registering on
   a bare `xpath3.Evaluator` (`Evaluator.Functions(nil, {fn:transform: ...})`), for callers driving xpath3
@@ -882,6 +887,12 @@ XSLT 3.0 stylesheet compilation + transformation on helium DOM with `xpath3` eva
   `unparsed-entity-uri()`, `unparsed-entity-public-id()`, `type-available()`, `snapshot()`, `copy-of()`,
   `accumulator-before()`/`accumulator-after()`, `current-merge-group()`/`current-merge-key()`, `transform()`
 - Output methods: `xml`, `html`, `xhtml`, `text`, `json`, `adaptive`
+- JSON serializes an empty result as `null` and a multi-item result sequence as a JSON array. Every map value and
+  array member must contain at most one item (`SERE0023`); an explicit XDM array also produces a JSON array.
+  Non-finite numeric values raise `SERE0020`, and unsupported function items raise `SERE0021`. A DOM-only result
+  with children is serialized as a JSON node item using `json-node-output-method`.
+- XML and XHTML serializers build UTF-8 output, then apply the requested encoding once. XML declarations carry the
+  requested encoding label, and US-ASCII output uses character references for non-ASCII text and attribute values.
 - `SerializeResult` (every principal and secondary result) writes no DTD the document carries: `xsl:copy-of` and
   `xsl:copy` of a source document keep its DTD on the copy for its unparsed entities, but XDM has no DTD node, so the
   output definition alone decides the document type declaration. A document with an internal subset is copied
@@ -973,7 +984,7 @@ XSLT 3.0 stylesheet compilation + transformation on helium DOM with `xpath3` eva
   `schema_context.go`, `schema_resolver_fs.go`, `package_*.go`, `streamability*.go`, `errors.go`,
   `resource_limit.go` (per-resource read cap + `MaxResourceBytes`/`ErrResourceTooLarge`); the XSLT element
   registry lives in `xslt3/internal/elements` (`elements.go`, `data.go`, see below)
-- Imports: helium, enum, html, stream, xpath3, xsd, internal/domutil, internal/intconv, internal/iofs,
+- Imports: helium, enum, html, stream, xpath3, xsd, internal/encoding, internal/domutil, internal/intconv, internal/iofs,
   internal/iolimit, internal/lexicon, internal/nodelink, internal/sequence, internal/uripath, internal/writerctl,
   internal/xmlchar, internal/xpath, internal/xpathstream, xslt3/internal/elements
 - Tests: hand-written unit tests only. The W3C XSLT 3.0 conformance suite lives in the sibling `helium-w3c-tests` module
@@ -1023,7 +1034,7 @@ Toggle" section in CLAUDE.md for what is implemented in 1.1.
     is a local path, names use `filepath.Join` and may be absolute / OS-style (rejected by `fs.ValidPath` FSes
     like `os.DirFS`/`fstest.MapFS`)
   - `Compile(ctx, *Document) → (*Schema, error)` / `CompileFile(ctx, path) → (*Schema, error)` — terminal methods;
-    return `(nil, ErrCompilationFailed)` on fatal schema diagnostics
+    return `(nil, ErrCompilationFailed)` on fatal schema diagnostics and `ctx.Err()` when canceled
 - **NewValidator(schema) → Validator** — create fluent builder for validation
   - `Label(name)`, `ErrorHandler(h)`, `Annotations(*TypeAnnotations)`, `NilledElements(*NilledElements)`,
     `IDNodes(*IDNodes)` — builder methods. `IDNodes` collects the PSVI is-id nodes (XDM 3.1): every
@@ -1032,7 +1043,7 @@ Toggle" section in CLAUDE.md for what is implemented in 1.1.
     union member is not is-id. Version-independent and runs regardless of `SkipDatatypeIntegrityChecks` (it
     observes a per-node property, it does not enforce document ID uniqueness). Feeds
     `xpath3.Evaluator.IDNodes` for `fn:id`/`fn:element-with-id`
-  - `Validate(ctx, *Document) → error` — terminal method
+  - `Validate(ctx, *Document) → error` — terminal method; returns `ctx.Err()` when canceled
 - **(*TypeDef).Validate(ctx, value, nsMap) → error** — validate a lexical value against a simple type; nsMap
   (prefix→URI) may be nil
 - **(*TypeDef).ValidateElement(ctx, elem, schema) → error** — validate an element's content against a type
@@ -1132,6 +1143,8 @@ RELAX NG schema compilation and validation.
 - Pattern-based: element, attribute, group, choice, interleave, optional, zeroOrMore, oneOrMore, ref, data, value, list,
   mixed, notAllowed
 - Supports: include with override, externalRef, parentRef, anyName/nsName/ncName, data types
+- Entity references in element content contribute their parsed replacement nodes to validation, including markup
+  replacement content. External entity access remains blocked by default in the parser.
 - Group backtracking for greedy pattern over-consumption
 - Interleave is compile-time partitioned into a routing table per branch (`interleave.go`); every `<interleave>`
   is checked against RELAX NG §7.4 (branches' element/text/attribute name classes must be pairwise disjoint) —
@@ -1238,6 +1251,8 @@ XInclude 1.0 processing with recursive inclusion and fallback.
 - Default `NewFSResolver` converts absolute `file:` hrefs to OS paths via `internal/iofs.FileURIToPath` (non-local hosts
   rejected)
 - Max URI 2000 chars, circular detection, doc/text caching
+- Root inclusion replacements, including `xi:fallback`, require exactly one element. Invalid fallbacks fail
+  before detaching the include or its fallback children; nested fallbacks may contain any number of elements.
 - Files: `xinclude.go`
 - Imports: helium, xpointer/, internal/encoding/, internal/iofs/, internal/lexicon/
 
@@ -1270,8 +1285,11 @@ Schematron schema compilation and validation.
   `.Validate(ctx, doc)`
 - `ErrValidationFailed` — sentinel returned by `Validator.Validate` on validation failure; individual `*ValidationError`
   delivered to ErrorHandler
+- Cancellation and deadlines stop validation and return the context error. Diagnostic paths use a sibling-position
+  cache local to each validation run; quiet validation and the default discard handler skip path construction.
 - `ErrNoSchema` — sentinel returned by `Validator.Validate` when the Validator has no compiled schema
 - `ErrCompileFailed` — sentinel returned by `Compiler.Compile`/`CompileFile` when compilation fails
+- Every `assert` and `report` requires a nonempty, unqualified `test` attribute, including in a rule with other valid tests.
 - `ErrUnsupportedQueryBinding` — sentinel returned by `ParseQueryBinding` and by `Compiler.Compile`/`CompileFile` for a
   query language binding this package does not implement
 - **QueryBinding** — `QueryBindingUnspecified` / `QueryBindingXPath1` (`xslt`, absent attribute) /
@@ -1316,6 +1334,8 @@ Streaming XML writer (no DOM needed).
 - Options: WithIndent(string), WithQuoteChar(byte)
 - Methods: StartDocument/EndDocument, StartElement/EndElement, WriteAttribute, WriteString (escaped), WriteRaw
   (unescaped), WriteComment, WritePI, WriteCDATA, StartDTD/EndDTD, WriteDTDElement/Entity/Attlist/Notation, Flush
+- `StartDocument` transcodes emitted XML to the declared supported encoding; UTF-8 is the default when no encoding
+  is declared. US-ASCII names are refused because this writer does not perform ASCII-only character escaping.
 - State machine: tracks open elements, namespace scopes, self-close optimization
 - Files: `stream.go` (single ~1100 line file)
 - Imports: internal/encoding/, internal/xmlchar/
@@ -1607,7 +1627,10 @@ XML Digital Signatures 1.1 (W3C xmldsig-core1). Sign and verify XML documents.
   (`helium.NewParser()`: XXE blocked, no FS, no network). Enveloped transforms are invalid on external input.
   Sign and verify share the same executor and conversions; signing supports Base64 but rejects XPath/XSLT
   because it cannot emit their parameters. `VerifiedReference.External` marks resolver-satisfied references,
-  and coverage helpers never attribute them to document elements. `FSReferenceResolver(fsys)` serves only
+  and coverage helpers never attribute them to document elements. `VerifiedReference.CoversElement` is false for
+  Manifest references and transforms that can filter or replace content (enveloped-signature, XPath, XSLT, and
+  Base64). `VerifyResult.Covers` and `SignedElement` report only whole-element coverage when that flag is true;
+  `VerifiedReference.Element` still exposes the resolved target. `FSReferenceResolver(fsys)` serves only
   contained slash paths, rejects schemes/fragments/escapes, performs no network access, and applies the 64 MiB
   cap; `LimitReferenceResolver` composes a lower per-resource cap around the built-in resolver or any custom
   resolver, applying the cap while the built-in FS resolver reads and checking arbitrary custom results after
@@ -2339,6 +2362,9 @@ Drop-in replacement for encoding/xml backed by helium parser.
   → *Encoder**
 - **Marshal(v) → ([]byte, error)** / **Unmarshal([]byte, v) → error**
 - API mirrors encoding/xml; strict mode only; undeclared namespace prefixes rejected
+- Declaration and charset initialization failures are terminal: later `Token` and `RawToken` calls return the
+  stored error without waiting on a SAX stream. Reader replay retains the XML declaration so the body parser
+  honors its XML version; a `CharsetReader` conversion is applied only once.
 - Known differences: empty elements self-closed, xmlns before regular attrs, InputOffset approximate
 - Files: `api.go`, `decoder.go`, `directive.go` (prolog scanner), `encoder.go`, `marshal.go`, `unmarshal.go`,
   `types.go`, `namespace.go`, `escape.go`, `compat_errors.go`, `doc.go`

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/lestrrat-go/helium"
+	xmlencoding "github.com/lestrrat-go/helium/internal/encoding"
 	"github.com/lestrrat-go/helium/internal/lexicon"
 	"github.com/lestrrat-go/helium/internal/writerctl"
 	"github.com/lestrrat-go/helium/stream"
@@ -141,7 +142,7 @@ func (w shortWriteCheckingWriter) Write(data []byte) (int, error) {
 // through unchanged.
 func xmlInvalidCharError(err error) error {
 	if err != nil && errors.Is(err, helium.ErrInvalidXMLChar) {
-		return dynamicError(errCodeSERE0006, "%s", err.Error())
+		return dynamicError(lexicon.ErrSERE0006, "%s", err.Error())
 	}
 	return err
 }
@@ -195,6 +196,10 @@ func serializeXMLWithCharMapInner(w io.Writer, doc *helium.Document, outDef *Out
 		enc := outDef.Encoding
 		if enc == "" {
 			enc = lexicon.EncodingUTF8U
+		} else if !xmlencoding.IsUTF8(enc) {
+			// The outer serializer transcodes the completed UTF-8 XML, so the
+			// stream writer must not encode it before that pass.
+			enc = ""
 		}
 		// The output XML version defaults to 1.0; xsl:output/@version="1.1"
 		// selects an XML 1.1 declaration.

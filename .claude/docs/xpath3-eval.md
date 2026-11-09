@@ -217,6 +217,8 @@ evaluation of E2 (`/a/(1, .)`) or across evaluations for different nodes. An emp
 
 ### BinaryExpr
 Arithmetic (`+ - * div idiv mod`): atomize both sides → numeric promotion → compute.
+The int64 arithmetic path detects overflow and falls back to `big.Int`, including `-1 * MinInt64` in either
+operand order. Its reverse-division multiplication check handles the overflowing `MinInt64 / -1` case explicitly.
 Logic (`and or`): EBV of both sides.
 Comparison: delegate to `GeneralCompare` or `ValueCompare`.
 
@@ -478,8 +480,11 @@ and the default xpath3 behavior is unchanged.
   document root's registration order, which orders nodes from different trees. A document can be registered
   without being indexed (`ReserveDocument`, used by `OrderStepResult` when a location step needs no sort, and by the `//` fusion); the
   first lookup that needs a position in it indexes it under the reserved order
-- Inline functions and named function refs snapshot the dynamic context they close over, so later focus rebinding does
-  not change captured behavior
+- Inline functions and named function refs preserve their captured focus, variables, and static configuration
+- Retained named refs and `function-lookup` items use the invoking evaluation's operation counter, operation limit,
+  node-set limit, resource-byte limit, recursion depth, document-order cache, and document cache. Their invocation
+  context provides cancellation. Direct invocation outside an evaluation gets fresh counters and caches with no
+  explicit limits.
 
 ## Safety Limits
 
@@ -491,6 +496,12 @@ and the default xpath3 behavior is unchanged.
 | Sequence/node-set size | 10M | `internal/xpath.DefaultMaxNodeSetLength` |
 
 Range expressions (`1 to N`) and `for` clauses also check sequence size limit.
+`tail`, `reverse`, `insert-before`, and `sort` charge sequence traversal and output work
+per item; `sort` also charges key evaluation and key comparisons. These loops
+check cancellation through the same operation accounting. `Evaluate` and
+`EvaluateEBV` reject a context already cancelled at entry.
+`sum` charges atomization and accumulation, including nested array members; `deep-equal` charges its recursive
+comparisons and map/attribute searches. Both stop without consuming the rest of a cancelled input.
 
 The limits hold where int is 32 bits:
 - The op counter saturates at `math.MaxInt` instead of wrapping (`countOps`; xpath1 does the same), and a

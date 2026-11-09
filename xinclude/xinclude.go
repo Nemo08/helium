@@ -328,6 +328,17 @@ func (proc Processor) ProcessTree(ctx context.Context, node helium.Node) (int, e
 }
 
 func (p *processor) processNode(ctx context.Context, n helium.Node) error {
+	if n == nil {
+		return nil
+	}
+	if isXInclude(n) {
+		inc, ok := helium.AsNode[*helium.Element](n)
+		if !ok {
+			return nil
+		}
+		return p.processInclude(ctx, inc)
+	}
+
 	// Repeatedly collect and process xi:include elements at this level.
 	// Fallback processing may insert new xi:include elements as siblings,
 	// so we loop until no more are found.
@@ -1069,10 +1080,13 @@ func (p *processor) handleFallback(inc *helium.Element, origErr error) error {
 	return origErr
 }
 
-func (p *processor) processFallback(inc *helium.Element, fb *helium.Element) error { //nolint:unparam // always nil but callers check for future-proofing
+func (p *processor) processFallback(inc *helium.Element, fb *helium.Element) error {
 	var nodes []helium.Node
 	for c := range helium.Children(fb) {
 		nodes = append(nodes, c)
+	}
+	if err := checkMultiRootInclusion(inc, nodes); err != nil {
+		return err
 	}
 
 	if len(nodes) == 0 {

@@ -29,6 +29,8 @@ that data for the lifetime of derived evaluators, contexts, and eval states.
 
 `Evaluate` is the terminal method; `ctx` is for cancellation/deadlines only,
 not configuration. All configuration comes from the fluent setters below.
+`Evaluate`, `EvaluateEBV`, and `EvaluateReuse` return an already-present context
+error before evaluating the expression.
 
 `EvaluateEBV` is the terminal method for a caller that only needs the effective boolean value of the whole
 expression. It returns the value and the errors that `Evaluate` followed by `Result.EBV()` returns, except that a
@@ -49,6 +51,7 @@ slices are cloned unless `EvalBorrowing` was set on `NewEvaluator`.
 ```go
 // Bindings & resolvers
 func (e Evaluator) Namespaces(ns map[string]string) Evaluator
+func (e Evaluator) EnvironmentVariables(vars map[string]string) Evaluator
 func (e Evaluator) Variables(vars map[string]Sequence) Evaluator
 func (e Evaluator) Functions(byLocal map[string]Function, byQName map[QualifiedName]Function) Evaluator
 func (e Evaluator) VariableResolver(r VariableResolver) Evaluator
@@ -291,6 +294,10 @@ Pass bindings as plain maps: variables via `Evaluator.Variables(map[string]Seque
 `EvalBorrowing` is set. Supply lazy lookups with `Evaluator.VariableResolver` /
 `Evaluator.FunctionResolver`.
 
+`fn:environment-variable` and `fn:available-environment-variables` read only the map
+passed to `Evaluator.EnvironmentVariables`. The default map is empty, so an evaluator
+does not expose the process environment. The map is cloned unless `EvalBorrowing` is set.
+
 **Resource loading is opt-in.** Without an explicit `URIResolver` or `HTTPClient` (`Evaluator.URIResolver` /
 `Evaluator.HTTPClient`), `fn:doc`, `fn:doc-available`, `fn:json-doc`, and the `fn:unparsed-text*` family error
 with `FODC0002` / `FOUT1170` for every URI — there is no implicit `http.DefaultClient` and no implicit
@@ -387,5 +394,8 @@ Standard codes: `XPTY0004` (type error), `FOER0000` (general), `FOTY0012` (typed
 element-only complex content), `FOTY0013` (atomization context), `FOAR0001` (division by zero), `FOAR0002`
 (numeric overflow/underflow, e.g. round precision past the non-terminating cap), `FOAY0001` (array index out
 of bounds), `FOMX0001` (map duplicate key reject).
+
+Code strings come from the `lexicon.ErrXXXX` constants in `internal/lexicon/errcode.go`. Production code and tests
+(including external `xpath3_test` files) use those constants instead of raw string literals.
 
 `try-catch` matches `*XPathError` by code. Non-`*XPathError` errors propagate through unchanged.

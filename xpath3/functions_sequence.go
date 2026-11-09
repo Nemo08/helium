@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"slices"
 	"sort"
 	"time"
 
@@ -48,14 +49,32 @@ func fnHead(_ context.Context, args []Sequence) (Sequence, error) {
 	return ItemSlice{args[0].Get(0)}, nil
 }
 
-func fnTail(_ context.Context, args []Sequence) (Sequence, error) {
+func fnTail(ctx context.Context, args []Sequence) (Sequence, error) {
 	if seqLen(args[0]) <= 1 {
 		return validNilSequence, nil
 	}
-	return ItemSlice(seqMaterialize(args[0])[1:]), nil
+	ec := getFnContext(ctx)
+	maxNodes := fnMaxNodes(ec)
+	var result ItemSlice
+	first := true
+	for item := range seqItems(args[0]) {
+		if first {
+			if err := fnCountOp(ctx, ec); err != nil {
+				return nil, err
+			}
+			first = false
+			continue
+		}
+		var err error
+		result, err = appendBoundedSeq(ctx, ec, result, ItemSlice{item}, maxNodes)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
 }
 
-func fnInsertBefore(_ context.Context, args []Sequence) (Sequence, error) {
+func fnInsertBefore(ctx context.Context, args []Sequence) (Sequence, error) {
 	target := args[0]
 	// $position is xs:integer: reject empty/multi-item/non-integer (XPTY0004).
 	posVal, err := coerceArgToInteger(args[1])
@@ -63,7 +82,7 @@ func fnInsertBefore(_ context.Context, args []Sequence) (Sequence, error) {
 		return nil, err
 	}
 	inserts := args[2]
-	tItems := seqMaterialize(target)
+	targetLen := seqLen(target)
 
 	// Clamp on the int64 value so an oversized position cannot wrap when
 	// converted to int (e.g. on 32-bit platforms): a position past the end
@@ -72,17 +91,38 @@ func fnInsertBefore(_ context.Context, args []Sequence) (Sequence, error) {
 	switch {
 	case posVal < 1:
 		pos = 1
-	case posVal > int64(len(tItems)+1):
-		pos = len(tItems) + 1
+	case posVal > int64(targetLen+1):
+		pos = targetLen + 1
 	default:
 		pos = int(posVal)
 	}
 
-	iItems := seqMaterialize(inserts)
-	result := make(ItemSlice, 0, len(tItems)+len(iItems))
-	result = append(result, tItems[:pos-1]...)
-	result = append(result, iItems...)
-	result = append(result, tItems[pos-1:]...)
+	ec := getFnContext(ctx)
+	maxNodes := fnMaxNodes(ec)
+	var result ItemSlice
+	i := 0
+	for item := range seqItems(target) {
+		if i+1 == pos {
+			var err error
+			result, err = appendBoundedSeq(ctx, ec, result, inserts, maxNodes)
+			if err != nil {
+				return nil, err
+			}
+		}
+		var err error
+		result, err = appendBoundedSeq(ctx, ec, result, ItemSlice{item}, maxNodes)
+		if err != nil {
+			return nil, err
+		}
+		i++
+	}
+	if pos == targetLen+1 {
+		var err error
+		result, err = appendBoundedSeq(ctx, ec, result, inserts, maxNodes)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return result, nil
 }
 
@@ -106,12 +146,18 @@ func fnRemove(_ context.Context, args []Sequence) (Sequence, error) {
 	return result, nil
 }
 
-func fnReverse(_ context.Context, args []Sequence) (Sequence, error) {
-	seq := args[0]
-	items := seqMaterialize(seq)
-	result := make(ItemSlice, len(items))
-	for i, item := range items {
-		result[len(items)-1-i] = item
+func fnReverse(ctx context.Context, args []Sequence) (Sequence, error) {
+	ec := getFnContext(ctx)
+	items, err := appendBoundedSeq(ctx, ec, nil, args[0], fnMaxNodes(ec))
+	if err != nil {
+		return nil, err
+	}
+	var result ItemSlice
+	for _, item := range slices.Backward(items) {
+		result, err = appendBoundedSeq(ctx, ec, result, ItemSlice{item}, fnMaxNodes(ec))
+		if err != nil {
+			return nil, err
+		}
 	}
 	return result, nil
 }
@@ -229,21 +275,21 @@ func fnUnordered(_ context.Context, args []Sequence) (Sequence, error) {
 
 func fnZeroOrOne(_ context.Context, args []Sequence) (Sequence, error) {
 	if seqLen(args[0]) > 1 {
-		return nil, &XPathError{Code: "FORG0003", Message: fmt.Sprintf("zero-or-one() called with sequence of length %d", seqLen(args[0]))}
+		return nil, &XPathError{Code: lexicon.ErrFORG0003, Message: fmt.Sprintf("zero-or-one() called with sequence of length %d", seqLen(args[0]))}
 	}
 	return args[0], nil
 }
 
 func fnOneOrMore(_ context.Context, args []Sequence) (Sequence, error) {
 	if seqLen(args[0]) == 0 {
-		return nil, &XPathError{Code: "FORG0004", Message: "one-or-more() called with empty sequence"}
+		return nil, &XPathError{Code: lexicon.ErrFORG0004, Message: "one-or-more() called with empty sequence"}
 	}
 	return args[0], nil
 }
 
 func fnExactlyOne(_ context.Context, args []Sequence) (Sequence, error) {
 	if seqLen(args[0]) != 1 {
-		return nil, &XPathError{Code: "FORG0005", Message: fmt.Sprintf("exactly-one() called with sequence of length %d", seqLen(args[0]))}
+		return nil, &XPathError{Code: lexicon.ErrFORG0005, Message: fmt.Sprintf("exactly-one() called with sequence of length %d", seqLen(args[0]))}
 	}
 	return args[0], nil
 }
@@ -262,19 +308,22 @@ func fnDeepEqual(ctx context.Context, args []Sequence) (Sequence, error) {
 	if ec := getFnContext(ctx); ec != nil {
 		opts.implicitTZ = ec.getImplicitTimezone()
 	}
-	eq, err := deepEqualSequence(args[0], args[1], opts)
+	eq, err := deepEqualSequence(ctx, args[0], args[1], opts)
 	if err != nil {
 		return nil, err
 	}
 	return SingleBoolean(eq), nil
 }
 
-func deepEqualSequence(a, b Sequence, opts deepEqualOptions) (bool, error) {
+func deepEqualSequence(ctx context.Context, a, b Sequence, opts deepEqualOptions) (bool, error) {
+	if err := fnCountOp(ctx, getFnContext(ctx)); err != nil {
+		return false, err
+	}
 	if seqLen(a) != seqLen(b) {
 		return false, nil
 	}
 	for i := range seqLen(a) {
-		eq, err := deepEqualItem(a.Get(i), b.Get(i), opts)
+		eq, err := deepEqualItem(ctx, a.Get(i), b.Get(i), opts)
 		if err != nil {
 			return false, err
 		}
@@ -285,7 +334,10 @@ func deepEqualSequence(a, b Sequence, opts deepEqualOptions) (bool, error) {
 	return true, nil
 }
 
-func deepEqualItem(a, b Item, opts deepEqualOptions) (bool, error) {
+func deepEqualItem(ctx context.Context, a, b Item, opts deepEqualOptions) (bool, error) {
+	if err := fnCountOp(ctx, getFnContext(ctx)); err != nil {
+		return false, err
+	}
 	switch av := a.(type) {
 	case AtomicValue:
 		bv, ok := b.(AtomicValue)
@@ -298,22 +350,22 @@ func deepEqualItem(a, b Item, opts deepEqualOptions) (bool, error) {
 		if !ok {
 			return false, nil
 		}
-		return deepEqualNode(av.Node, bv.Node, opts), nil
+		return deepEqualNode(ctx, av.Node, bv.Node, opts)
 	case MapItem:
 		bv, ok := b.(MapItem)
 		if !ok {
 			return false, nil
 		}
-		return deepEqualMap(av, bv, opts)
+		return deepEqualMap(ctx, av, bv, opts)
 	case ArrayItem:
 		bv, ok := b.(ArrayItem)
 		if !ok {
 			return false, nil
 		}
-		return deepEqualArray(av, bv, opts)
+		return deepEqualArray(ctx, av, bv, opts)
 	case FunctionItem:
 		if _, ok := b.(FunctionItem); ok {
-			return false, &XPathError{Code: "FOTY0015", Message: "deep-equal: cannot compare function items"}
+			return false, &XPathError{Code: lexicon.ErrFOTY0015, Message: "deep-equal: cannot compare function items"}
 		}
 		return false, nil
 	default:
@@ -345,9 +397,13 @@ func deepEqualAtomic(a, b AtomicValue, opts deepEqualOptions) (bool, error) {
 	return eq, nil
 }
 
-func deepEqualNode(a, b helium.Node, opts deepEqualOptions) bool {
+func deepEqualNode(ctx context.Context, a, b helium.Node, opts deepEqualOptions) (bool, error) {
+	ec := getFnContext(ctx)
+	if err := fnCountOp(ctx, ec); err != nil {
+		return false, err
+	}
 	if a.Type() != b.Type() {
-		return false
+		return false, nil
 	}
 	strEq := func(sa, sb string) bool {
 		if opts.coll != nil {
@@ -357,74 +413,78 @@ func deepEqualNode(a, b helium.Node, opts deepEqualOptions) bool {
 	}
 	switch a.Type() {
 	case helium.DocumentNode:
-		return deepEqualChildren(a, b, opts)
+		return deepEqualChildren(ctx, a, b, opts)
 	case helium.ElementNode:
 		ae, aOK := a.(*helium.Element)
 		be, bOK := b.(*helium.Element)
 		if !aOK || !bOK {
-			return false
+			return false, nil
 		}
 		// Compare expanded name (local name + namespace URI)
 		if ae.LocalName() != be.LocalName() || ae.URI() != be.URI() {
-			return false
+			return false, nil
 		}
 		// Compare attributes (order-independent)
 		aAttrs := ae.Attributes()
 		bAttrs := be.Attributes()
 		if len(aAttrs) != len(bAttrs) {
-			return false
+			return false, nil
 		}
 		for _, aa := range aAttrs {
 			found := false
 			for _, ba := range bAttrs {
+				if err := fnCountOp(ctx, ec); err != nil {
+					return false, err
+				}
 				if aa.LocalName() == ba.LocalName() && aa.URI() == ba.URI() {
 					if !strEq(aa.Value(), ba.Value()) {
-						return false
+						return false, nil
 					}
 					found = true
 					break
 				}
 			}
 			if !found {
-				return false
+				return false, nil
 			}
 		}
 		// Compare children
-		return deepEqualChildren(a, b, opts)
+		return deepEqualChildren(ctx, a, b, opts)
 	case helium.AttributeNode:
 		aa, aOK := a.(*helium.Attribute)
 		ba, bOK := b.(*helium.Attribute)
 		if !aOK || !bOK {
-			return false
+			return false, nil
 		}
-		return aa.LocalName() == ba.LocalName() && aa.URI() == ba.URI() && strEq(aa.Value(), ba.Value())
+		return aa.LocalName() == ba.LocalName() && aa.URI() == ba.URI() && strEq(aa.Value(), ba.Value()), nil
 	case helium.NamespaceNode:
-		return a.Name() == b.Name() && string(a.Content()) == string(b.Content())
+		return a.Name() == b.Name() && string(a.Content()) == string(b.Content()), nil
 	case helium.TextNode, helium.CDATASectionNode:
-		return strEq(string(a.Content()), string(b.Content()))
+		return strEq(string(a.Content()), string(b.Content())), nil
 	case helium.CommentNode:
-		return string(a.Content()) == string(b.Content())
+		return string(a.Content()) == string(b.Content()), nil
 	case helium.ProcessingInstructionNode:
-		return a.Name() == b.Name() && string(a.Content()) == string(b.Content())
+		return a.Name() == b.Name() && string(a.Content()) == string(b.Content()), nil
 	default:
-		return false
+		return false, nil
 	}
 }
 
-func deepEqualChildren(a, b helium.Node, opts deepEqualOptions) bool {
+func deepEqualChildren(ctx context.Context, a, b helium.Node, opts deepEqualOptions) (bool, error) {
 	ac := a.FirstChild()
 	bc := b.FirstChild()
 	for ac != nil && bc != nil {
-		if !deepEqualNode(ac, bc, opts) {
-			return false
+		eq, err := deepEqualNode(ctx, ac, bc, opts)
+		if err != nil || !eq {
+			return false, err
 		}
 		ac = ac.NextSibling()
 		bc = bc.NextSibling()
 	}
-	return ac == nil && bc == nil
+	return ac == nil && bc == nil, nil
 }
 
-func deepEqualMap(a, b MapItem, opts deepEqualOptions) (bool, error) {
+func deepEqualMap(ctx context.Context, a, b MapItem, opts deepEqualOptions) (bool, error) {
 	if a.Size() != b.Size() {
 		return false, nil
 	}
@@ -433,18 +493,25 @@ func deepEqualMap(a, b MapItem, opts deepEqualOptions) (bool, error) {
 	aKeys := a.keys0()
 	bKeys := b.keys0()
 	bUsed := make([]bool, len(bKeys))
+	ec := getFnContext(ctx)
 	for _, ak := range aKeys {
+		if err := fnCountOp(ctx, ec); err != nil {
+			return false, err
+		}
 		found := false
 		// Try exact lookup first (fast path)
-		if bVal, ok := b.Get(ak); ok {
-			aVal, _ := a.Get(ak)
-			eq, err := deepEqualSequence(aVal, bVal, opts)
+		if bVal, ok := b.get0(ak); ok {
+			aVal, _ := a.get0(ak)
+			eq, err := deepEqualSequence(ctx, aVal, bVal, opts)
 			if err != nil {
 				return false, err
 			}
 			if eq {
 				// Mark the matching b key as used
 				for j, bk := range bKeys {
+					if err := fnCountOp(ctx, ec); err != nil {
+						return false, err
+					}
 					if !bUsed[j] {
 						if sameMapKey(ak, bk) {
 							bUsed[j] = true
@@ -457,16 +524,19 @@ func deepEqualMap(a, b MapItem, opts deepEqualOptions) (bool, error) {
 		}
 		if !found {
 			// Slow path: compare keys by value (cross-type)
-			aVal, _ := a.Get(ak)
+			aVal, _ := a.get0(ak)
 			for j, bk := range bKeys {
+				if err := fnCountOp(ctx, ec); err != nil {
+					return false, err
+				}
 				if bUsed[j] {
 					continue
 				}
 				if !sameMapKey(ak, bk) {
 					continue
 				}
-				bVal, _ := b.Get(bk)
-				eq, err := deepEqualSequence(aVal, bVal, opts)
+				bVal, _ := b.get0(bk)
+				eq, err := deepEqualSequence(ctx, aVal, bVal, opts)
 				if err != nil {
 					return false, err
 				}
@@ -488,14 +558,14 @@ func sameMapKey(a, b AtomicValue) bool {
 	return normalizeMapKey(a) == normalizeMapKey(b)
 }
 
-func deepEqualArray(a, b ArrayItem, opts deepEqualOptions) (bool, error) {
+func deepEqualArray(ctx context.Context, a, b ArrayItem, opts deepEqualOptions) (bool, error) {
 	am0, bm0 := a.members0(), b.members0()
 	if len(am0) != len(bm0) {
 		return false, nil
 	}
 	for i := range am0 {
 		am, bm := am0[i], bm0[i]
-		eq, err := deepEqualSequence(am, bm, opts)
+		eq, err := deepEqualSequence(ctx, am, bm, opts)
 		if err != nil {
 			return false, err
 		}
@@ -566,7 +636,7 @@ func fnIndexOf(ctx context.Context, args []Sequence) (Sequence, error) {
 func fnLast(ctx context.Context, _ []Sequence) (Sequence, error) {
 	fc := getFnContext(ctx)
 	if fc == nil || (fc.node == nil && fc.contextItem == nil) {
-		return nil, &XPathError{Code: errCodeXPDY0002, Message: "last() requires a focus (context item)"}
+		return nil, &XPathError{Code: lexicon.ErrXPDY0002, Message: "last() requires a focus (context item)"}
 	}
 	return SingleInteger(int64(fc.size)), nil
 }
@@ -574,7 +644,7 @@ func fnLast(ctx context.Context, _ []Sequence) (Sequence, error) {
 func fnPosition(ctx context.Context, _ []Sequence) (Sequence, error) {
 	fc := getFnContext(ctx)
 	if fc == nil || (fc.node == nil && fc.contextItem == nil) {
-		return nil, &XPathError{Code: errCodeXPDY0002, Message: "position() requires a focus (context item)"}
+		return nil, &XPathError{Code: lexicon.ErrXPDY0002, Message: "position() requires a focus (context item)"}
 	}
 	return SingleInteger(int64(fc.position)), nil
 }
@@ -582,7 +652,12 @@ func fnPosition(ctx context.Context, _ []Sequence) (Sequence, error) {
 // fnSort implements fn:sort($input [, $collation [, $key]])
 func fnSort(ctx context.Context, args []Sequence) (Sequence, error) {
 	input := args[0]
+	ec := getFnContext(ctx)
+	maxNodes := fnMaxNodes(ec)
 	if seqLen(input) <= 1 {
+		if err := fnCountOp(ctx, ec); err != nil {
+			return nil, err
+		}
 		return input, nil
 	}
 
@@ -614,29 +689,34 @@ func fnSort(ctx context.Context, args []Sequence) (Sequence, error) {
 	// Compute sort keys
 	type sortPair struct {
 		item Item
-		key  Sequence
+		key  []AtomicValue
 	}
-	inputItems := seqMaterialize(input)
+	inputItems, err := appendBoundedSeq(ctx, ec, nil, input, maxNodes)
+	if err != nil {
+		return nil, err
+	}
 	pairs := make([]sortPair, len(inputItems))
 	for i, item := range inputItems {
+		if err := fnCountOp(ctx, ec); err != nil {
+			return nil, err
+		}
 		if keyFn != nil {
 			k, err := keyFn.Invoke(ctx, []Sequence{ItemSlice{item}})
 			if err != nil {
 				return nil, err
 			}
-			pairs[i] = sortPair{item: item, key: k}
+			atoms, err := atomizeTypedValue(ctx, k)
+			if err != nil {
+				return nil, err
+			}
+			pairs[i] = sortPair{item: item, key: atoms}
 		} else {
 			// Default key: fn:data() semantics (atomize, flattening arrays)
-			atoms, err := AtomizeSequence(ItemSlice{item})
+			atoms, err := atomizeTypedValue(ctx, ItemSlice{item})
 			if err != nil {
-				pairs[i] = sortPair{item: item, key: nil}
-			} else {
-				key := make(ItemSlice, len(atoms))
-				for k, a := range atoms {
-					key[k] = a
-				}
-				pairs[i] = sortPair{item: item, key: key}
+				return nil, err
 			}
+			pairs[i] = sortPair{item: item, key: atoms}
 		}
 	}
 
@@ -646,15 +726,20 @@ func fnSort(ctx context.Context, args []Sequence) (Sequence, error) {
 		if sortErr != nil {
 			return false
 		}
+		if err := fnCountOp(ctx, ec); err != nil {
+			sortErr = err
+			return false
+		}
 		ki := pairs[i].key
 		kj := pairs[j].key
-		minLen := min(seqLen(ki), seqLen(kj))
+		minLen := min(len(ki), len(kj))
 		for idx := range minLen {
-			ai, err1 := AtomizeItem(ki.Get(idx))
-			aj, err2 := AtomizeItem(kj.Get(idx))
-			if err1 != nil || err2 != nil {
+			if err := fnCountOp(ctx, ec); err != nil {
+				sortErr = err
 				return false
 			}
+			ai := ki[idx]
+			aj := kj[idx]
 			cmp, err := valueCompareThreeWay(ai, aj, coll)
 			if err != nil {
 				sortErr = err
@@ -669,15 +754,18 @@ func fnSort(ctx context.Context, args []Sequence) (Sequence, error) {
 			// Equal — continue to next key component
 		}
 		// All compared items equal; shorter key comes first
-		return seqLen(ki) < seqLen(kj)
+		return len(ki) < len(kj)
 	})
 	if sortErr != nil {
 		return nil, sortErr
 	}
 
-	result := make(ItemSlice, len(pairs))
-	for i, p := range pairs {
-		result[i] = p.item
+	var result ItemSlice
+	for _, p := range pairs {
+		result, sortErr = appendBoundedSeq(ctx, ec, result, ItemSlice{p.item}, maxNodes)
+		if sortErr != nil {
+			return nil, sortErr
+		}
 	}
 	return result, nil
 }

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/lestrrat-go/helium"
+	"github.com/lestrrat-go/helium/internal/lexicon"
 	"github.com/lestrrat-go/helium/xpath3"
 	"github.com/lestrrat-go/helium/xslt3"
 	"github.com/stretchr/testify/require"
@@ -53,6 +54,47 @@ func TestSerializeResult(t *testing.T) {
 		err = xslt3.SerializeResult(&buf, doc, ss.DefaultOutputDef())
 		require.NoError(t, err)
 		require.Contains(t, buf.String(), "<root>hello</root>")
+	})
+
+	t.Run("US-ASCII replaces unrepresentable characters with references", func(t *testing.T) {
+		doc, err := helium.NewParser().Parse(t.Context(), []byte(`<root title="café">café 😀</root>`))
+		require.NoError(t, err)
+
+		for _, encoding := range []string{"US-ASCII", "ascii"} {
+			t.Run(encoding, func(t *testing.T) {
+				var buf bytes.Buffer
+				err := xslt3.SerializeResult(&buf, doc, &xslt3.OutputDef{
+					Method:   outMethodXML,
+					Encoding: encoding,
+				})
+				require.NoError(t, err)
+				require.Equal(t, `<?xml version="1.0" encoding="`+encoding+`"?><root title="caf&#xE9;">caf&#xE9; &#x1F600;</root>`, buf.String())
+				for _, b := range buf.Bytes() {
+					require.Less(t, b, byte(0x80), "US-ASCII output contains byte 0x%X", b)
+				}
+
+				parsed, err := helium.NewParser().Parse(t.Context(), buf.Bytes())
+				require.NoError(t, err)
+				require.Equal(t, "café 😀", helium.CharacterData(parsed.DocumentElement()))
+			})
+		}
+
+		var omitted bytes.Buffer
+		err = xslt3.SerializeResult(&omitted, doc, &xslt3.OutputDef{
+			Method:          outMethodXML,
+			Encoding:        "US-ASCII",
+			OmitDeclaration: true,
+		})
+		require.NoError(t, err)
+		require.Equal(t, `<root title="caf&#xE9;">caf&#xE9; &#x1F600;</root>`, omitted.String())
+
+		namedDoc, err := helium.NewParser().Parse(t.Context(), []byte(`<élément/>`))
+		require.NoError(t, err)
+		err = xslt3.SerializeResult(&bytes.Buffer{}, namedDoc, &xslt3.OutputDef{
+			Method:   outMethodXML,
+			Encoding: "US-ASCII",
+		})
+		require.ErrorContains(t, err, "cannot be represented in US-ASCII XML markup")
 	})
 
 	t.Run("XML omits writer terminators", func(t *testing.T) {
@@ -312,7 +354,7 @@ func TestSerializeResult(t *testing.T) {
 			ResolvedCharMap:      map[rune]string{'r': "R"},
 		}
 
-		requireExactOutputAndShortWrite(t, []byte(`<?xml veRsion="1.0" encoding="UTF-8"?><Root/>`), 1, func(w io.Writer) error {
+		requireExactOutputAndShortWrite(t, []byte(`"<Root\/>"`), 1, func(w io.Writer) error {
 			return xslt3.SerializeResult(w, doc, outDef)
 		})
 	})
@@ -534,6 +576,26 @@ func TestAdaptiveOutput(t *testing.T) {
 }
 
 func TestSerializeItems(t *testing.T) {
+	t.Run("empty JSON", func(t *testing.T) {
+		for _, doc := range []*helium.Document{nil, helium.NewDocument(xmlVersion10, "", helium.StandaloneImplicitNo)} {
+			var buf bytes.Buffer
+			err := xslt3.SerializeItems(&buf, nil, doc, &xslt3.OutputDef{Method: outMethodJSON})
+			require.NoError(t, err)
+			require.Equal(t, "null", buf.String())
+		}
+	})
+	t.Run("multiple JSON result items", func(t *testing.T) {
+		items := xpath3.ItemSlice{
+			xpath3.AtomicValue{TypeName: xpath3.TypeInteger, Value: int64(1)},
+			xpath3.AtomicValue{TypeName: xpath3.TypeInteger, Value: int64(2)},
+		}
+
+		var buf bytes.Buffer
+		err := xslt3.SerializeItems(&buf, items, nil, &xslt3.OutputDef{Method: outMethodJSON})
+		require.NoError(t, err)
+		require.Equal(t, "[1,2]", buf.String())
+	})
+
 	t.Run("atomics", func(t *testing.T) {
 		items := xpath3.ItemSlice{
 			xpath3.AtomicValue{TypeName: xpath3.TypeString, Value: "alpha"},
@@ -1149,7 +1211,7 @@ func TestSerializeItems(t *testing.T) {
 			{
 				name:  "Array",
 				want:  `["<root\/>","<root\/>"]`,
-				items: xpath3.ItemSlice{node, node},
+				items: xpath3.ItemSlice{xpath3.NewArray([]xpath3.Sequence{xpath3.ItemSlice{node}, xpath3.ItemSlice{node}})},
 			},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
@@ -1322,7 +1384,7 @@ func requireSERE0006(t *testing.T, err error) {
 	require.Error(t, err)
 	var xe *xslt3.XSLTError
 	require.ErrorAs(t, err, &xe)
-	require.Equal(t, "SERE0006", xe.Code)
+	require.Equal(t, lexicon.ErrSERE0006, xe.Code)
 }
 
 // requireControlCharRef asserts the serialized output carries a character

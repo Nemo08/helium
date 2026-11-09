@@ -104,7 +104,7 @@ func checkSumAvgType(a AtomicValue) error {
 		return nil
 	}
 	return &XPathError{
-		Code:    errCodeFORG0006,
+		Code:    lexicon.ErrFORG0006,
 		Message: fmt.Sprintf("invalid type %s for aggregate function", a.TypeName),
 	}
 }
@@ -120,7 +120,7 @@ func checkAggregateHomogeneity(family, newFamily string) (string, error) {
 		return familyNumeric, nil
 	}
 	return "", &XPathError{
-		Code:    errCodeFORG0006,
+		Code:    lexicon.ErrFORG0006,
 		Message: fmt.Sprintf("incompatible types in aggregate: %s and %s", family, newFamily),
 	}
 }
@@ -232,7 +232,7 @@ func avgDurations(seq Sequence, family string) (Sequence, error) {
 	// overflows the value space (matching op:add-yearMonthDurations) before
 	// dividing.
 	if !totalMonths.IsInt64() {
-		return nil, &XPathError{Code: errCodeFODT0002, Message: "duration overflow"}
+		return nil, &XPathError{Code: lexicon.ErrFODT0002, Message: "duration overflow"}
 	}
 	// Divide the exact month total by the count using rational arithmetic so
 	// large totals (e.g. avg of two P9007199254740993M values) keep full
@@ -249,7 +249,7 @@ func avgDurations(seq Sequence, family string) (Sequence, error) {
 		absInt = new(big.Int).Neg(avgInt)
 	}
 	if !absInt.IsInt64() || absInt.Int64() > int64(math.MaxInt) {
-		return nil, &XPathError{Code: errCodeFODT0002, Message: "duration overflow"}
+		return nil, &XPathError{Code: lexicon.ErrFODT0002, Message: "duration overflow"}
 	}
 	return SingleAtomic(AtomicValue{
 		TypeName: TypeYearMonthDuration,
@@ -264,7 +264,7 @@ func promoteForAggregate(a AtomicValue) (AtomicValue, error) {
 			dec, err := CastFromString(s, TypeDecimal)
 			if err != nil {
 				return AtomicValue{}, &XPathError{
-					Code:    errCodeFORG0001,
+					Code:    lexicon.ErrFORG0001,
 					Message: fmt.Sprintf("cannot promote %q to xs:decimal", s),
 				}
 			}
@@ -275,7 +275,7 @@ func promoteForAggregate(a AtomicValue) (AtomicValue, error) {
 		f, err := castToDouble(a)
 		if err != nil {
 			return AtomicValue{}, &XPathError{
-				Code:    errCodeFORG0001,
+				Code:    lexicon.ErrFORG0001,
 				Message: fmt.Sprintf("cannot promote %q to xs:double", a.StringVal()),
 			}
 		}
@@ -397,7 +397,7 @@ func maxMinCommon(atoms []AtomicValue, isMax bool, coll *collationImpl) (Sequenc
 		family := aggregateTypeFamily(a)
 		if family == "" || family == lexicon.TypeDuration {
 			return nil, &XPathError{
-				Code:    errCodeFORG0006,
+				Code:    lexicon.ErrFORG0006,
 				Message: fmt.Sprintf("invalid type %s for %s", a.TypeName, fnName),
 			}
 		}
@@ -421,7 +421,7 @@ func maxMinCommon(atoms []AtomicValue, isMax bool, coll *collationImpl) (Sequenc
 		newFamily := aggregateTypeFamily(a)
 		if newFamily == "" || newFamily == "duration" {
 			return nil, &XPathError{
-				Code:    errCodeFORG0006,
+				Code:    lexicon.ErrFORG0006,
 				Message: fmt.Sprintf("invalid type %s for %s", a.TypeName, fnName),
 			}
 		}
@@ -429,7 +429,7 @@ func maxMinCommon(atoms []AtomicValue, isMax bool, coll *collationImpl) (Sequenc
 			family = newFamily
 		} else if family != newFamily {
 			return nil, &XPathError{
-				Code:    errCodeFORG0006,
+				Code:    lexicon.ErrFORG0006,
 				Message: fmt.Sprintf("incompatible types in %s: %s and %s", fnName, family, newFamily),
 			}
 		}
@@ -497,9 +497,22 @@ func maxMinCommon(atoms []AtomicValue, isMax bool, coll *collationImpl) (Sequenc
 	return SingleAtomic(bestOrig), nil
 }
 
-func fnSum(_ context.Context, args []Sequence) (Sequence, error) {
+func fnSum(ctx context.Context, args []Sequence) (Sequence, error) {
 	// Atomize to handle arrays: sum([1,2,3]) should flatten the array
-	atoms, err := AtomizeSequence(args[0])
+	ec := getFnContext(ctx)
+	maxNodes := fnMaxNodes(ec)
+	check := func() error { return fnCountOp(ctx, ec) }
+	var atoms []AtomicValue
+	_, err := atomizeStreamChecked(args[0], nil, check, func(a AtomicValue) (bool, error) {
+		if err := check(); err != nil {
+			return false, err
+		}
+		if maxNodes > 0 && len(atoms) >= maxNodes {
+			return false, ErrNodeSetLimit
+		}
+		atoms = append(atoms, a)
+		return true, nil
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -532,6 +545,9 @@ func fnSum(_ context.Context, args []Sequence) (Sequence, error) {
 	widest := TypeInteger
 
 	for _, a := range atoms {
+		if err := check(); err != nil {
+			return nil, err
+		}
 		a, err = promoteForAggregate(a)
 		if err != nil {
 			return nil, err
@@ -571,9 +587,12 @@ func fnSum(_ context.Context, args []Sequence) (Sequence, error) {
 	if family == familyDurationYM || family == familyDurationDT {
 		atomSeq := make(ItemSlice, len(atoms))
 		for i, a := range atoms {
+			if err := check(); err != nil {
+				return nil, err
+			}
 			atomSeq[i] = a
 		}
-		return sumDurations(atomSeq, family)
+		return sumDurations(ctx, atomSeq, family)
 	}
 	if allInt {
 		return SingleIntegerBig(sumInt), nil
@@ -587,12 +606,16 @@ func fnSum(_ context.Context, args []Sequence) (Sequence, error) {
 	return SingleDouble(sumFloat), nil
 }
 
-func sumDurations(seq Sequence, family string) (Sequence, error) {
+func sumDurations(ctx context.Context, seq Sequence, family string) (Sequence, error) {
+	ec := getFnContext(ctx)
 	if family == familyDurationDT {
 		// Accumulate dayTime seconds EXACTLY so large totals (beyond float64's
 		// 2^53 range) and fractional seconds canonicalize precisely.
 		totalSecs := new(big.Rat)
 		for item := range seqItems(seq) {
+			if err := fnCountOp(ctx, ec); err != nil {
+				return nil, err
+			}
 			a, _ := AtomizeItem(item)
 			totalSecs.Add(totalSecs, durationToRat(a.DurationVal(), false))
 		}
@@ -612,6 +635,9 @@ func sumDurations(seq Sequence, family string) (Sequence, error) {
 	// to an invalid negative lexical; reject anything that overflows int.
 	totalMonths := new(big.Int)
 	for item := range seqItems(seq) {
+		if err := fnCountOp(ctx, ec); err != nil {
+			return nil, err
+		}
 		a, _ := AtomizeItem(item)
 		d := a.DurationVal()
 		m := big.NewInt(int64(d.Months))
@@ -627,7 +653,7 @@ func sumDurations(seq Sequence, family string) (Sequence, error) {
 		absMonths = new(big.Int).Neg(totalMonths)
 	}
 	if !absMonths.IsInt64() || absMonths.Int64() > int64(math.MaxInt) {
-		return nil, &XPathError{Code: errCodeFODT0002, Message: "yearMonthDuration sum overflow"}
+		return nil, &XPathError{Code: lexicon.ErrFODT0002, Message: "yearMonthDuration sum overflow"}
 	}
 	return SingleAtomic(AtomicValue{
 		TypeName: TypeYearMonthDuration,

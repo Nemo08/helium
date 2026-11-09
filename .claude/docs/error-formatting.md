@@ -327,11 +327,17 @@ matches any joined sentinel (see `dynamicErrorCause`).
 
 **Error code checker**: `isXSLTError(err, code) → bool` — unwraps and matches `XSLTError.Code`.
 
+JSON serialization uses `XSLTError` with `SERE0020` for non-finite numbers, `SERE0021` for unsupported
+function items, and `SERE0023` for a sequence containing multiple items at any JSON value position.
+
 ### Shim (`shim/compat_errors.go`)
 
 `convertParseError()` maps helium `ErrParseError` → `encoding/xml.SyntaxError`:
 - `"invalid name start char"` → `"expected element name after <"`
 - Namespace errors mapped to stdlib phrasing
+
+Declaration/charset initialization errors are retained by `Decoder`; repeated token reads return the same
+error even when no SAX event channel was started.
 
 ### XML Digital Signatures (`xmldsig1/errors.go`)
 
@@ -498,8 +504,9 @@ All validation errors flow through `ErrorHandler.Handle()`. No `strings.Builder`
 
 ### Schematron
 
-`Validate()` returns `ErrValidationFailed` sentinel on failure. Individual `*ValidationError` errors go to
-`ErrorHandler`. `Quiet()` suppresses error delivery to the handler.
+`Validate()` returns `ErrValidationFailed` on invalid input and the context error on cancellation or an expired
+deadline. Individual `*ValidationError` errors go to `ErrorHandler`. `Quiet()` suppresses those validation
+diagnostics; XPath evaluation diagnostics still reach the handler.
 
 ### DTD
 
