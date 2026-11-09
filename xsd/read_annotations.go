@@ -87,7 +87,8 @@ func firstXSDElementChild(elem *helium.Element, local string) *helium.Element {
 }
 
 // readAppInfo captures one xs:appinfo child: its @source, the in-scope
-// namespaces, and the serialized child content.
+// namespaces, and the serialized child content. A canceled context yields the
+// zero value.
 func readAppInfo(ctx context.Context, elem *helium.Element) AppInfo {
 	if ctx.Err() != nil {
 		return AppInfo{}
@@ -100,8 +101,7 @@ func readAppInfo(ctx context.Context, elem *helium.Element) AppInfo {
 	w := helium.NewWriter().InheritedNamespaces(ai.Namespaces)
 	for child := range helium.Children(elem) {
 		if ctx.Err() != nil {
-			// Keep the metadata already gathered; the payload is best-effort.
-			return AppInfo{Source: ai.Source, Namespaces: ai.Namespaces}
+			return AppInfo{}
 		}
 		if err := w.WriteTo(&buf, child); err != nil {
 			// A node that was parsed successfully is always serializable; if
