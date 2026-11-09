@@ -1468,10 +1468,12 @@ func (c *compiler) parseSchemaChildren(ctx context.Context, root *helium.Element
 		case isXSDElement(elem, elemAttribute):
 			c.parseGlobalAttribute(ctx, elem)
 		case isXSDElement(elem, elemNotation):
-			c.collectNotation(elem)
+			c.collectNotation(ctx, elem)
 		case isXSDElement(elem, elemAnnotation):
 			// xs:schema admits several annotations; record them in document order.
-			c.schema.annotations = append(c.schema.annotations, c.readAnnotationElement(elem))
+			if ann := c.readAnnotationElement(ctx, elem); ann != nil {
+				c.schema.annotations = append(c.schema.annotations, ann)
+			}
 		default:
 			// The xs:schema content model is a closed vocabulary of top-level
 			// components plus the composition/annotation elements handled before

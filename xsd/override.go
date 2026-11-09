@@ -349,7 +349,7 @@ func (c *compiler) registerOverrideChild(ctx context.Context, key overrideKey, e
 		// (mirroring parseSchemaChildren) so an xs:NOTATION-restriction enumeration
 		// can resolve against a declared notation (W3C over015): the override child
 		// notation replaces the suppressed target notation in c.notations.
-		c.collectNotation(elem)
+		c.collectNotation(ctx, elem)
 	}
 	return nil
 }
@@ -357,7 +357,7 @@ func (c *compiler) registerOverrideChild(ctx context.Context, key overrideKey, e
 // collectNotation records an <xs:notation>'s name in c.notations (in the current
 // document's target namespace), matching parseSchemaChildren's notation handling,
 // and captures the public declaration in Schema.notations.
-func (c *compiler) collectNotation(elem *helium.Element) {
+func (c *compiler) collectNotation(ctx context.Context, elem *helium.Element) {
 	name := collapsedAttr(elem, attrName)
 	if name == "" {
 		return
@@ -368,7 +368,7 @@ func (c *compiler) collectNotation(elem *helium.Element) {
 		Name:       qn,
 		PublicID:   getAttr(elem, attrPublic),
 		SystemID:   getAttr(elem, attrSystem),
-		Annotation: c.readAnnotation(elem),
+		Annotation: c.readAnnotation(ctx, elem),
 		Line:       elem.Line(),
 		Source:     c.diagSource(),
 	}
@@ -679,12 +679,14 @@ func (c *compiler) overrideParseTargetChildren(ctx context.Context, root *helium
 			// A target notation NOT overridden is kept; collect its name so an
 			// xs:NOTATION-restriction enumeration can resolve against it (mirroring
 			// parseSchemaChildren). An overridden one was suppressed above.
-			c.collectNotation(elem)
+			c.collectNotation(ctx, elem)
 		case isXSDElement(elem, elemAnnotation):
 			// The target document's xs:schema-level annotations are metadata, not
 			// overridable components; record them in document order (mirroring
 			// parseSchemaChildren).
-			c.schema.annotations = append(c.schema.annotations, c.readAnnotationElement(elem))
+			if ann := c.readAnnotationElement(ctx, elem); ann != nil {
+				c.schema.annotations = append(c.schema.annotations, ann)
+			}
 		}
 	}
 	return nil

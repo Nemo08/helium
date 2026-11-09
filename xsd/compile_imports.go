@@ -1892,7 +1892,7 @@ func (c *compiler) processRedefineOverrides(ctx context.Context, redefineElem *h
 				}
 			}
 			c.schema.attrGroups[qn] = attrs
-			c.schema.attrGroupAnnotations[qn] = c.readAnnotation(elem)
+			c.schema.attrGroupAnnotations[qn] = c.readAnnotation(ctx, elem)
 			// Store the override's effective group wildcard: the group's own
 			// xs:anyAttribute INTERSECTED with the original wildcard a self-reference
 			// re-contributes. The type's "complete wildcard" further intersects the

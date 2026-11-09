@@ -1,6 +1,7 @@
 package xsd
 
 import (
+	"context"
 	"strings"
 
 	"github.com/lestrrat-go/helium"
@@ -12,35 +13,46 @@ import (
 //
 // It deliberately never reports diagnostics and never returns an error: the
 // shape of xs:annotation is validated separately by checkAnnotations, and
-// capturing metadata must not influence whether a schema compiles.
-func (c *compiler) readAnnotation(elem *helium.Element) *Annotation {
+// capturing metadata must not influence whether a schema compiles. A canceled
+// context stops the walk and yields nil; the surrounding compile phase then
+// surfaces ctx.Err().
+func (c *compiler) readAnnotation(ctx context.Context, elem *helium.Element) *Annotation {
+	if ctx.Err() != nil {
+		return nil
+	}
 	annElem := firstXSDElementChild(elem, elemAnnotation)
 	if annElem == nil {
 		return nil
 	}
-	return c.readAnnotationElement(annElem)
+	return c.readAnnotationElement(ctx, annElem)
 }
 
 // readAnnotationElement snapshots one xs:annotation element. It never fails and
-// never emits diagnostics.
-func (c *compiler) readAnnotationElement(annElem *helium.Element) *Annotation {
+// never emits diagnostics; a canceled context yields nil.
+func (c *compiler) readAnnotationElement(ctx context.Context, annElem *helium.Element) *Annotation {
+	if ctx.Err() != nil {
+		return nil
+	}
 	ann := &Annotation{
 		Line:   annElem.Line(),
 		Source: c.diagSource(),
 	}
 	for child := range helium.Children(annElem) {
+		if ctx.Err() != nil {
+			return nil
+		}
 		ce, ok := child.(*helium.Element)
 		if !ok || ce.URI() != lexicon.NamespaceXSD {
 			continue
 		}
 		switch ce.LocalName() {
 		case elemAppinfo:
-			ann.AppInfos = append(ann.AppInfos, readAppInfo(ce))
+			ann.AppInfos = append(ann.AppInfos, readAppInfo(ctx, ce))
 		case elemDocumentation:
-			ann.Documentation = append(ann.Documentation, readDocumentation(ce))
+			ann.Documentation = append(ann.Documentation, readDocumentation(ctx, ce))
 		}
 	}
-	ann.RawXML = serializeAnnotation(annElem)
+	ann.RawXML = serializeAnnotation(ctx, annElem)
 	return ann
 }
 
@@ -49,8 +61,12 @@ func (c *compiler) readAnnotationElement(annElem *helium.Element) *Annotation {
 // subtree uses, so the result can be parsed without the surrounding document.
 // A node that was parsed successfully is always serializable; if that ever
 // fails, the typed fields remain available and RawXML is left empty rather than
-// failing compilation over annotation metadata.
-func serializeAnnotation(annElem *helium.Element) string {
+// failing compilation over annotation metadata. The writer itself is not
+// context-aware, so cancellation is only observed before serialization starts.
+func serializeAnnotation(ctx context.Context, annElem *helium.Element) string {
+	if ctx.Err() != nil {
+		return ""
+	}
 	var buf strings.Builder
 	if err := helium.NewWriter().WriteTo(&buf, annElem); err != nil {
 		return ""
@@ -72,7 +88,10 @@ func firstXSDElementChild(elem *helium.Element, local string) *helium.Element {
 
 // readAppInfo captures one xs:appinfo child: its @source, the in-scope
 // namespaces, and the serialized child content.
-func readAppInfo(elem *helium.Element) AppInfo {
+func readAppInfo(ctx context.Context, elem *helium.Element) AppInfo {
+	if ctx.Err() != nil {
+		return AppInfo{}
+	}
 	ai := AppInfo{
 		Source:     getAttr(elem, attrSource),
 		Namespaces: collectNSContext(elem),
@@ -80,6 +99,10 @@ func readAppInfo(elem *helium.Element) AppInfo {
 	var buf strings.Builder
 	w := helium.NewWriter().InheritedNamespaces(ai.Namespaces)
 	for child := range helium.Children(elem) {
+		if ctx.Err() != nil {
+			// Keep the metadata already gathered; the payload is best-effort.
+			return AppInfo{Source: ai.Source, Namespaces: ai.Namespaces}
+		}
 		if err := w.WriteTo(&buf, child); err != nil {
 			// A node that was parsed successfully is always serializable; if
 			// that ever fails, expose the payload without inner XML rather
@@ -91,8 +114,12 @@ func readAppInfo(elem *helium.Element) AppInfo {
 	return ai
 }
 
-// readDocumentation captures one xs:documentation child.
-func readDocumentation(elem *helium.Element) Documentation {
+// readDocumentation captures one xs:documentation child. A canceled context
+// yields the zero value.
+func readDocumentation(ctx context.Context, elem *helium.Element) Documentation {
+	if ctx.Err() != nil {
+		return Documentation{}
+	}
 	return Documentation{
 		ID:     annotationXMLAttr(elem, lexicon.AttrID),
 		Lang:   annotationXMLAttr(elem, lexicon.AttrLang),

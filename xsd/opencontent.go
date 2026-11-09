@@ -978,7 +978,7 @@ func (c *compiler) parseOpenContent(ctx context.Context, elem *helium.Element) *
 	if wc == nil {
 		return nil
 	}
-	return &OpenContent{Mode: mode, Wildcard: wc, Annotation: c.readAnnotation(elem)}
+	return &OpenContent{Mode: mode, Wildcard: wc, Annotation: c.readAnnotation(ctx, elem)}
 }
 
 // openContentOrderViolation returns the schema-error message when an
@@ -1182,7 +1182,7 @@ func (c *compiler) readDefaultOpenContent(ctx context.Context, root *helium.Elem
 	if wc == nil {
 		return nil
 	}
-	return &OpenContent{Mode: mode, Wildcard: wc, AppliesToEmpty: appliesToEmpty, Annotation: c.readAnnotation(dec)}
+	return &OpenContent{Mode: mode, Wildcard: wc, AppliesToEmpty: appliesToEmpty, Annotation: c.readAnnotation(ctx, dec)}
 }
 
 // collectModelElementNames returns the set of element expanded names declared

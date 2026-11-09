@@ -99,7 +99,7 @@ func (c *compiler) recordAttrGroupRef(td *TypeDef, qn QName, src attrGroupRefUse
 }
 
 func (c *compiler) parseComplexType(ctx context.Context, elem *helium.Element, local bool) (*TypeDef, error) {
-	td := &TypeDef{IsComplex: true, Annotation: c.readAnnotation(elem)}
+	td := &TypeDef{IsComplex: true, Annotation: c.readAnnotation(ctx, elem)}
 	c.recordTypeDefSource(td, elem.Line(), true, elem.LocalName())
 	component := componentLocalComplexType
 	if !local {
@@ -520,8 +520,8 @@ func (c *compiler) parseComplexContent(ctx context.Context, elem *helium.Element
 // recordDerivationAnnotation appends the xs:annotation of a derivation element
 // (simpleContent, complexContent, restriction, extension, list, union) to the
 // type definition it shapes.
-func (c *compiler) recordDerivationAnnotation(td *TypeDef, elem *helium.Element) {
-	if ann := c.readAnnotation(elem); ann != nil {
+func (c *compiler) recordDerivationAnnotation(ctx context.Context, td *TypeDef, elem *helium.Element) {
+	if ann := c.readAnnotation(ctx, elem); ann != nil {
 		td.DerivationAnnotations = append(td.DerivationAnnotations, DerivationAnnotation{
 			Kind:       elem.LocalName(),
 			Annotation: ann,
@@ -565,7 +565,7 @@ func (c *compiler) parseDerivationWrapper(ctx context.Context, wrapper *helium.E
 				report(ce, fmt.Sprintf("A '%s' must not have more than one 'annotation'.", wrapper.LocalName()))
 			}
 			if !annotationSeen {
-				c.recordDerivationAnnotation(td, wrapper)
+				c.recordDerivationAnnotation(ctx, td, wrapper)
 			}
 			annotationSeen = true
 			continue
@@ -594,14 +594,14 @@ func (c *compiler) parseDerivationWrapper(ctx context.Context, wrapper *helium.E
 
 func (c *compiler) parseRestriction(ctx context.Context, elem *helium.Element, td *TypeDef, component string) error {
 	td.Derivation = DerivationRestriction
-	c.recordDerivationAnnotation(td, elem)
+	c.recordDerivationAnnotation(ctx, td, elem)
 	c.recordDerivationBaseRef(ctx, elem, td)
 	return c.parseComplexContentDerivationBody(ctx, elem, td, DerivationRestriction, component)
 }
 
 func (c *compiler) parseExtension(ctx context.Context, elem *helium.Element, td *TypeDef, component string) error {
 	td.Derivation = DerivationExtension
-	c.recordDerivationAnnotation(td, elem)
+	c.recordDerivationAnnotation(ctx, td, elem)
 	c.recordDerivationBaseRef(ctx, elem, td)
 	return c.parseComplexContentDerivationBody(ctx, elem, td, DerivationExtension, component)
 }
@@ -855,7 +855,7 @@ func (c *compiler) parseSimpleContent(ctx context.Context, elem *helium.Element,
 // lenient loop and the XSD 1.1 strict wrapper so both behave identically once a
 // derivation is selected.
 func (c *compiler) dispatchSimpleContentDerivation(ctx context.Context, ce *helium.Element, td *TypeDef, kind DerivationKind, component string) {
-	c.recordDerivationAnnotation(td, ce)
+	c.recordDerivationAnnotation(ctx, td, ce)
 	// @base is an xs:QName: dispatch on PRESENCE via resolveQNameRef so a
 	// PRESENT-but-empty base="" (or whitespace-only) is reported once as an invalid
 	// QName, not silently treated as absent.
@@ -1152,7 +1152,7 @@ func (c *compiler) parseSimpleContentRestrictionType(ctx context.Context, deriva
 func (c *compiler) parseSimpleType(ctx context.Context, elem *helium.Element, local bool) (*TypeDef, error) {
 	td := &TypeDef{
 		ContentType: ContentTypeSimple,
-		Annotation:  c.readAnnotation(elem),
+		Annotation:  c.readAnnotation(ctx, elem),
 	}
 
 	// Record source info for this type as a local (anonymous/inline) simple
@@ -1230,7 +1230,7 @@ func (c *compiler) parseSimpleType(ctx context.Context, elem *helium.Element, lo
 			continue
 		}
 		derivationChild = ce.LocalName()
-		c.recordDerivationAnnotation(td, ce)
+		c.recordDerivationAnnotation(ctx, td, ce)
 		switch {
 		case isXSDElement(ce, elemRestriction):
 			c.checkSimpleTypeDerivationBody(ctx, elem, ce)
@@ -1507,7 +1507,7 @@ func (c *compiler) parseFacets(ctx context.Context, restriction *helium.Element)
 			nsCopy := make(map[string]string, len(nsCtx))
 			maps.Copy(nsCopy, nsCtx)
 			fs.EnumerationNS = append(fs.EnumerationNS, nsCopy)
-			fs.EnumerationAnnotations = append(fs.EnumerationAnnotations, c.readAnnotation(ce))
+			fs.EnumerationAnnotations = append(fs.EnumerationAnnotations, c.readAnnotation(ctx, ce))
 		case facetMinInclusive:
 			if duplicateSingletonFacet(ce, facetMinInclusive) {
 				continue
@@ -1672,7 +1672,7 @@ func (c *compiler) parseFacets(ctx context.Context, restriction *helium.Element)
 		// Record the facet's own annotation. Skipped facets (duplicates,
 		// invalid values, version-mismatched assertions) have already hit a
 		// continue above, so this runs only for facets that were recorded.
-		if ann := c.readAnnotation(ce); ann != nil {
+		if ann := c.readAnnotation(ctx, ce); ann != nil {
 			if fs == nil {
 				fs = &FacetSet{}
 			}

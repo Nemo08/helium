@@ -124,7 +124,7 @@ func (c *compiler) parseNamedGroup(ctx context.Context, elem *helium.Element) er
 			source = c.includeFile
 		}
 		c.groupSources[qn] = groupSource{line: elem.Line(), source: source}
-		c.schema.groupAnnotations[qn] = c.readAnnotation(elem)
+		c.schema.groupAnnotations[qn] = c.readAnnotation(ctx, elem)
 	}
 	// The model group child is REQUIRED. A group carrying only an annotation (or
 	// only stray children) is invalid; suppress the duplicate diagnostic when a
@@ -310,7 +310,7 @@ func (c *compiler) parseNamedAttributeGroup(ctx context.Context, elem *helium.El
 		}
 	}
 	c.schema.attrGroups[qn] = attrs
-	c.schema.attrGroupAnnotations[qn] = c.readAnnotation(elem)
+	c.schema.attrGroupAnnotations[qn] = c.readAnnotation(ctx, elem)
 	// Record the declaring source so the duplicate-attribute-use diagnostic cites
 	// the file the group was actually declared in: the include file when inside an
 	// include/redefine, else this compiler's filename (mirroring parseNamedGroup /
@@ -456,7 +456,7 @@ func (c *compiler) parseModelGroup(ctx context.Context, elem *helium.Element, co
 		Compositor: compositor,
 		MinOccurs:  minOccurs,
 		MaxOccurs:  maxOccurs,
-		Annotation: c.readAnnotation(elem),
+		Annotation: c.readAnnotation(ctx, elem),
 	}
 
 	// The XML representation of an inline model group has the content model
@@ -637,7 +637,7 @@ func (c *compiler) parseModelGroup(ctx context.Context, elem *helium.Element, co
 				placeholder := &ModelGroup{
 					MinOccurs:  placeholderMin,
 					MaxOccurs:  placeholderMax,
-					Annotation: c.readAnnotation(ce),
+					Annotation: c.readAnnotation(ctx, ce),
 				}
 				qn := c.resolveQName(ctx, ce, attrRef, ref)
 				c.groupRefs[placeholder] = qn

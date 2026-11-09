@@ -82,7 +82,7 @@ func (c *compiler) parseTypeAlternative(ctx context.Context, elem *helium.Elemen
 		Namespaces: nsCtx,
 		Line:       elem.Line(),
 		Source:     c.diagSource(),
-		Annotation: c.readAnnotation(elem),
+		Annotation: c.readAnnotation(ctx, elem),
 		// fn:static-base-uri() exposes the SCHEMA document URI, never the diagnostic
 		// label/source (which may be a caller-supplied error-message string).
 		BaseURI: c.schemaBaseURI,
