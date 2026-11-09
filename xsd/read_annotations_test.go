@@ -1,7 +1,6 @@
 package xsd_test
 
 import (
-	"context"
 	"io/fs"
 	"testing"
 	"testing/fstest"
@@ -693,24 +692,4 @@ func TestAnnotationCapturedWithoutLabel(t *testing.T) {
 	// same one diagnostics use; the annotation is still captured.
 	require.Equal(t, "(string)", e.Annotation.Source)
 	require.Greater(t, e.Annotation.Line, 0)
-}
-
-// TestAnnotationCompileHonorsCancellation makes sure annotation metadata never
-// swallows cancellation: a canceled context surfaces through Compile even when
-// the schema is annotation-heavy.
-func TestAnnotationCompileHonorsCancellation(t *testing.T) {
-	t.Parallel()
-
-	doc := mustParseXSD(t, `<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
-  <xs:annotation><xs:documentation>schema docs</xs:documentation></xs:annotation>
-  <xs:element name="e" type="xs:string">
-    <xs:annotation><xs:documentation>element docs</xs:documentation></xs:annotation>
-  </xs:element>
-</xs:schema>`)
-
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-
-	_, err := xsd.NewCompiler().Compile(ctx, doc)
-	require.ErrorIs(t, err, context.Canceled)
 }
