@@ -9,7 +9,9 @@ Compilation and validation return `ctx.Err()` when canceled. Compilation checks
 the context at entry, during schema-tree walks, between major compile phases, and
 for each top-level schema component. Validation checks before schema-hint loading, at recursive element
 validation boundaries and during document-wide occurrence walks; cancellation
-stops later passes and is returned by `Validator.Validate`.
+stops later passes and is returned by `Validator.Validate`. Annotation metadata
+reads (`read_annotations.go`) are schema-tree walks too: a canceled context stops
+them and yields no metadata, and the enclosing compile phase surfaces `ctx.Err()`.
 
 Files: `xsd/xsd.go` (API), `compile*.go` + `read_*.go` + `link_refs.go` + `restriction_particle.go` +
 `check_*.go` (compile/read/resolve/constraint pipeline), `validate.go` + `validate_elem.go` (content
